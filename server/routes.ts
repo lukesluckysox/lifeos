@@ -615,6 +615,14 @@ export async function registerRoutes(
             const secById = new Map<string, any>();
             for (const s of allSecurities) secById.set(s.security_id, s);
 
+            // Per Plaid docs: cost_basis is the average cost per share
+            // (NOT total). Total cost = cost_basis * quantity. cost_basis
+            // can be null when the institution doesn't supply it (common
+            // for crypto, some brokerages). Track which holdings have a
+            // real cost so we can compute portfolio-level gain ONLY over
+            // the cost-known subset — mixing unknown-cost rows into the
+            // total dilutes the aggregate toward nonsense (which was the
+            // –64.52% bug).
             const normalizedHoldings: any[] = allHoldings.map((h: any) => {
               const sec = secById.get(h.security_id) || {};
               const ticker = sec.ticker_symbol || sec.proxy_security_id || sec.security_id || "—";
@@ -622,22 +630,43 @@ export async function registerRoutes(
               const quantity = Number(h.quantity) || 0;
               const price = Number(h.institution_price ?? sec.close_price ?? 0) || 0;
               const value = Number(h.institution_value ?? (quantity * price)) || 0;
-              const cost = Number(h.cost_basis ?? 0) * quantity || (quantity && h.cost_basis ? Number(h.cost_basis) * quantity : 0);
-              // Plaid doesn't give day change directly — try previous close
+
+              // cost_basis is per-share. Only treat it as known if Plaid
+              // actually returned a non-null, positive number.
+              const rawCostBasis = h.cost_basis;
+              const hasCostBasis = rawCostBasis != null && Number(rawCostBasis) > 0 && quantity > 0;
+              const totalCost = hasCostBasis ? Number(rawCostBasis) * quantity : null;
+
               const prevClose = Number(sec.close_price ?? 0);
-              const dayChangePct = prevClose > 0 && price > 0
+              const dayChangePct = prevClose > 0 && price > 0 && price !== prevClose
                 ? ((price - prevClose) / prevClose) * 100
                 : 0;
-              const gainPct = cost > 0 ? ((value - cost) / cost) * 100 : 0;
-              return { ticker, name, value, dayChangePct, gainPct, quantity, price };
+
+              const gainPct = totalCost != null && totalCost > 0
+                ? ((value - totalCost) / totalCost) * 100
+                : 0;
+
+              return {
+                ticker, name, value, dayChangePct, gainPct, quantity, price,
+                _cost: totalCost, // internal — used for aggregate, stripped before send
+              };
             });
 
+            // Aggregate over ALL holdings for value/dayChange,
+            // but ONLY over cost-known holdings for totalGain.
             const totalValue = normalizedHoldings.reduce((s, h) => s + h.value, 0);
-            const totalCost = normalizedHoldings.reduce((s, h) => s + (h.price && h.gainPct !== 0 ? h.value / (1 + h.gainPct / 100) : h.value), 0);
-            const totalGain = totalValue - totalCost;
-            const totalGainPct = totalCost > 0 ? (totalGain / totalCost) * 100 : 0;
+            const costKnown = normalizedHoldings.filter(h => h._cost != null);
+            const costKnownValue = costKnown.reduce((s, h) => s + h.value, 0);
+            const costKnownCost = costKnown.reduce((s, h) => s + h._cost, 0);
+            const totalGain = costKnownCost > 0 ? costKnownValue - costKnownCost : 0;
+            const totalGainPct = costKnownCost > 0 ? (totalGain / costKnownCost) * 100 : 0;
             const dayChange = normalizedHoldings.reduce((s, h) => s + (h.value * (h.dayChangePct / 100)), 0);
-            const dayChangePct = totalValue > 0 ? (dayChange / (totalValue - dayChange)) * 100 : 0;
+            const dayChangePct = totalValue > 0 && totalValue !== dayChange
+              ? (dayChange / (totalValue - dayChange)) * 100
+              : 0;
+
+            // Strip the internal _cost field before shipping to client
+            for (const h of normalizedHoldings) delete h._cost;
 
             plaidData = {
               totalValue,

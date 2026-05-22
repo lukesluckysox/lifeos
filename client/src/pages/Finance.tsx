@@ -68,10 +68,28 @@ function usePortfolio() {
   const dayChange = plaidDayChange + manualDayChange;
   const dayChangePct = netWorth > 0 ? (dayChange / (netWorth - dayChange)) * 100 : 0;
 
-  const plaidCost = portfolio?.plaid ? (plaidValue - (portfolio.plaid.totalGain || 0)) : 0;
+  // Lifetime gain: only include the cost-known portion of the portfolio.
+  // Plaid sometimes returns cost_basis=null for holdings; the server
+  // already excludes those from totalGain, so plaidCost here represents
+  // ONLY the cost-known Plaid value. We must also restrict the
+  // numerator to that cost-known Plaid value (not full plaidValue),
+  // otherwise the unknown-cost holdings inflate the gain.
+  const plaidTotalGain = portfolio?.plaid?.totalGain || 0;
+  const plaidGainPct = portfolio?.plaid?.totalGainPct || 0;
+  // Derive the cost-known Plaid value: if gainPct is known, cost = value/(1+gainPct/100), and known-value = cost + gain
+  const plaidKnownCost = plaidGainPct !== 0 || plaidTotalGain !== 0
+    ? (plaidTotalGain / (plaidGainPct / 100 || 1))
+    : 0;
+  const plaidKnownValue = plaidKnownCost + plaidTotalGain;
+  // Manual holdings always have known cost (user enters it)
   const manualCost = manualHoldings.reduce((s, h) => s + h.quantity * h.costBasis, 0);
-  const totalCost = plaidCost + manualCost;
-  const blendedGainPct = totalCost > 0 ? ((netWorth - totalCost) / totalCost) * 100 : 0;
+  const manualKnownValue = manualHoldings.reduce((s, h) => s + h.value, 0);
+  const blendedKnownCost = plaidKnownCost + manualCost;
+  const blendedKnownValue = plaidKnownValue + manualKnownValue;
+  const totalCost = blendedKnownCost;
+  const blendedGainPct = blendedKnownCost > 0
+    ? ((blendedKnownValue - blendedKnownCost) / blendedKnownCost) * 100
+    : 0;
 
   const allocRows = [
     ...plaidHoldings.map(h => ({ symbol: h.ticker, name: h.name, value: h.value, dayChangePct: h.dayChangePct, source: "plaid" as const })),
