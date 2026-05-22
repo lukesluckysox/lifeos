@@ -2105,7 +2105,7 @@ export async function registerRoutes(
             "anthropic-version": "2023-06-01",
           },
           body: JSON.stringify({
-            model: "claude-3-5-sonnet-latest",
+            model: "claude-sonnet-4-5",
             max_tokens: 600,
             system,
             messages: [{ role: "user", content: userMsg }],
@@ -2117,7 +2117,7 @@ export async function registerRoutes(
         }
         const j: any = await r.json();
         const answer = j.content?.[0]?.text || "(no response)";
-        return res.json({ answer, model: "claude-3.5-sonnet" });
+        return res.json({ answer, model: "claude-sonnet-4.5" });
       }
 
       if (perplexityKey) {
