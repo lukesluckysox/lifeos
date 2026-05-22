@@ -92,8 +92,15 @@ function usePortfolio() {
     : 0;
 
   const allocRows = [
-    ...plaidHoldings.map(h => ({ symbol: h.ticker, name: h.name, value: h.value, dayChangePct: h.dayChangePct, source: "plaid" as const })),
-    ...manualHoldings.map(h => ({ symbol: h.symbol, name: h.name, value: h.value, dayChangePct: h.dayChangePct, source: "manual" as const })),
+    ...plaidHoldings.map(h => ({ symbol: h.ticker, name: h.name, value: h.value, dayChangePct: h.dayChangePct, gainPct: h.gainPct, source: "plaid" as const })),
+    ...manualHoldings.map(h => ({
+      symbol: h.symbol,
+      name: h.name,
+      value: h.value,
+      dayChangePct: h.dayChangePct,
+      gainPct: h.quantity * h.costBasis > 0 ? ((h.value - h.quantity * h.costBasis) / (h.quantity * h.costBasis)) * 100 : 0,
+      source: "manual" as const,
+    })),
   ]
     .sort((a, b) => b.value - a.value)
     .slice(0, 12)
@@ -285,9 +292,18 @@ function FinancePortfolio() {
                   >
                     <div className="font-mono text-foreground font-medium w-16">{r.symbol}</div>
                     <div className="flex-1 min-w-0 text-xs text-muted-foreground truncate">{r.name}</div>
-                    <div className="font-mono tabular text-muted-foreground w-16 text-right">{fixed(r.weight, 1)}%</div>
-                    <div className={`font-mono tabular w-20 text-right ${safePct(r.dayChangePct) >= 0 ? "text-teal" : "text-rose"}`}>
-                      {signedFixed(r.dayChangePct)}
+                    <div className="font-mono tabular text-muted-foreground w-14 text-right">{fixed(r.weight, 1)}%</div>
+                    <div className="hidden sm:flex flex-col items-end w-20">
+                      <div className={`font-mono tabular text-[11px] ${safePct(r.dayChangePct) >= 0 ? "text-teal" : "text-rose"}`}>
+                        {signedFixed(r.dayChangePct)}
+                      </div>
+                      <div className="font-mono text-[9px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">today</div>
+                    </div>
+                    <div className="flex flex-col items-end w-20">
+                      <div className={`font-mono tabular text-[11px] ${safePct(r.gainPct) >= 0 ? "text-teal" : "text-rose"}`}>
+                        {signedFixed(r.gainPct)}
+                      </div>
+                      <div className="font-mono text-[9px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">overall</div>
                     </div>
                     <div className="font-mono tabular w-24 text-right text-foreground">
                       ${(Number.isFinite(r.value) ? r.value : 0).toLocaleString(undefined,{maximumFractionDigits:0})}
