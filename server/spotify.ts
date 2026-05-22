@@ -214,6 +214,207 @@ export async function getNewReleasesFromFollowed(userId: number, opts: { limit?:
   return { source: "spotify-new-releases", tracks: sorted, asOf: new Date().toISOString() };
 }
 
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// Genre rollups — Spotify exposes genres on /artists, not /tracks. We
+// fetch artist metadata for a batch of artist IDs and roll up genres.
+// ───────────────────────────────────────────────────────────────────────────────────────────
+
+export interface ArtistMeta {
+  id: string;
+  name: string;
+  url?: string;
+  image?: string;
+  genres: string[];
+}
+
+/**
+ * Batch-fetch artist metadata (incl. genres) for up to 50 IDs per call.
+ * Returns a map keyed by artist ID.
+ */
+async function getArtistsMetadata(userId: number, ids: string[]): Promise<Map<string, ArtistMeta>> {
+  const result = new Map<string, ArtistMeta>();
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  for (let i = 0; i < unique.length; i += 50) {
+    const batch = unique.slice(i, i + 50);
+    try {
+      const data: any = await userApi(userId, "/artists", { ids: batch.join(",") });
+      for (const a of (data.artists || [])) {
+        if (!a?.id) continue;
+        result.set(a.id, {
+          id: a.id,
+          name: a.name,
+          url: a.external_urls?.spotify,
+          image: a.images?.[1]?.url || a.images?.[0]?.url,
+          genres: Array.isArray(a.genres) ? a.genres : [],
+        });
+      }
+    } catch { /* skip batch on error */ }
+  }
+  return result;
+}
+
+/**
+ * Normalize Spotify's hyper-specific micro-genres into a smaller set of
+ * recognizable buckets. "chillwave", "dream pop", "shoegaze" → "indie".
+ * "trap", "drill", "southern hip hop" → "hip hop". Etc.
+ *
+ * Order matters — first match wins.
+ */
+function bucketGenre(raw: string): string {
+  const g = raw.toLowerCase();
+  const rules: Array<[RegExp, string]> = [
+    [/reggae|dub|dancehall|ska/, "Reggae"],
+    [/hip hop|hip-hop|hiphop|rap|trap|drill|grime/, "Hip-hop"],
+    [/r&b|rnb|soul|neo soul|neo-soul/, "R&B / Soul"],
+    [/edm|house|techno|trance|drum and bass|dnb|dubstep|electro|bass|tropical/, "Electronic"],
+    [/indie|shoegaze|dream pop|chillwave|bedroom/, "Indie"],
+    [/rock|punk|grunge|metal|emo|post-hardcore/, "Rock"],
+    [/pop/, "Pop"],
+    [/folk|americana|country|bluegrass/, "Folk / Country"],
+    [/jazz|bebop|swing|bossa/, "Jazz"],
+    [/classical|orchestra|baroque|romantic|opera/, "Classical"],
+    [/lo-fi|lofi|chill|ambient|downtempo/, "Ambient / Lo-fi"],
+    [/latin|reggaeton|salsa|cumbia|bachata/, "Latin"],
+    [/world|afrobeat|highlife|k-pop|j-pop/, "World"],
+  ];
+  for (const [re, label] of rules) if (re.test(g)) return label;
+  // Title-case fallback for unknown buckets
+  return g.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+export interface GenreBucket {
+  genre: string;
+  count: number;
+  artists: Array<{ id: string; name: string; url?: string; image?: string }>;
+  lastPlayedAt?: string; // ISO, most recent track in this bucket
+  sampleTrack?: { name: string; artist: string; image?: string; url?: string };
+}
+
+/**
+ * Given a list of tracks (each with `artists: [{id,name}]`), roll up by
+ * primary artist genre. Returns top-N buckets sorted by count desc, each
+ * with up to 5 sample artists (deduped) and the most recent track.
+ */
+async function rollupByGenre(
+  userId: number,
+  tracksWithArtists: Array<{
+    id: string;
+    name: string;
+    artists: Array<{ id: string; name: string }>;
+    image?: string;
+    url?: string;
+    playedAt?: string;
+  }>,
+  topN = 6,
+): Promise<GenreBucket[]> {
+  const artistIds = Array.from(new Set(
+    tracksWithArtists.flatMap(t => t.artists.map(a => a.id)).filter(Boolean),
+  ));
+  const meta = await getArtistsMetadata(userId, artistIds);
+
+  const buckets = new Map<string, GenreBucket>();
+  for (const t of tracksWithArtists) {
+    const primary = t.artists[0];
+    if (!primary) continue;
+    const am = meta.get(primary.id);
+    const rawGenres = am?.genres?.length ? am.genres : ["Unknown"];
+    // Use the first genre as the primary bucket
+    const genre = bucketGenre(rawGenres[0]);
+
+    let b = buckets.get(genre);
+    if (!b) {
+      b = { genre, count: 0, artists: [], sampleTrack: undefined };
+      buckets.set(genre, b);
+    }
+    b.count++;
+    // Track most recent
+    if (t.playedAt && (!b.lastPlayedAt || t.playedAt > b.lastPlayedAt)) {
+      b.lastPlayedAt = t.playedAt;
+      b.sampleTrack = { name: t.name, artist: primary.name, image: t.image, url: t.url };
+    } else if (!b.sampleTrack) {
+      b.sampleTrack = { name: t.name, artist: primary.name, image: t.image, url: t.url };
+    }
+    // Add unique artists (up to 5)
+    if (b.artists.length < 5 && !b.artists.some(a => a.id === primary.id)) {
+      b.artists.push({
+        id: primary.id,
+        name: primary.name,
+        url: am?.url,
+        image: am?.image,
+      });
+    }
+  }
+
+  return Array.from(buckets.values())
+    .filter(b => b.genre !== "Unknown" || buckets.size === 1)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, topN);
+}
+
+/** Recently played → rolled up by genre (replaces per-track recent list). */
+export async function getRecentByGenre(userId: number, limit = 50) {
+  const data: any = await userApi(userId, "/me/player/recently-played", { limit });
+  const tracks = (data.items || []).map((it: any) => ({
+    id: it.track.id,
+    name: it.track.name,
+    artists: (it.track.artists || []).map((a: any) => ({ id: a.id, name: a.name })),
+    image: it.track.album?.images?.[1]?.url || it.track.album?.images?.[0]?.url,
+    url: it.track.external_urls?.spotify,
+    playedAt: it.played_at,
+  }));
+  const genres = await rollupByGenre(userId, tracks, 6);
+  return { source: "spotify-recent-by-genre", genres, asOf: new Date().toISOString() };
+}
+
+/** Top tracks (short_term) → rolled up by genre. */
+export async function getRotationByGenre(userId: number, limit = 50) {
+  const data: any = await userApi(userId, "/me/top/tracks", { time_range: "short_term", limit });
+  const tracks = (data.items || []).map((it: any) => ({
+    id: it.id,
+    name: it.name,
+    artists: (it.artists || []).map((a: any) => ({ id: a.id, name: a.name })),
+    image: it.album?.images?.[1]?.url || it.album?.images?.[0]?.url,
+    url: it.external_urls?.spotify,
+  }));
+  const genres = await rollupByGenre(userId, tracks, 6);
+  return { source: "spotify-rotation-by-genre", genres, asOf: new Date().toISOString() };
+}
+
+/**
+ * Followed artists with their genres + image, sized for a left-rail list.
+ */
+export async function getFollowedArtistsWithGenres(userId: number, limit = 20) {
+  const data: any = await userApi(userId, "/me/following", { type: "artist", limit });
+  const artists: ArtistMeta[] = (data.artists?.items || []).map((a: any) => ({
+    id: a.id,
+    name: a.name,
+    url: a.external_urls?.spotify,
+    image: a.images?.[1]?.url || a.images?.[0]?.url,
+    genres: Array.isArray(a.genres) ? a.genres : [],
+  }));
+  return {
+    source: "spotify-followed-artists",
+    artists: artists.map(a => ({
+      ...a,
+      primaryGenre: a.genres[0] ? bucketGenre(a.genres[0]) : undefined,
+    })),
+    asOf: new Date().toISOString(),
+  };
+}
+
+/**
+ * Upcoming/recent releases from followed artists. Same data as
+ * getNewReleasesFromFollowed but with a tighter default window (30 days)
+ * and surfaced as "scheduled upcoming".
+ */
+export async function getUpcomingReleases(userId: number, opts: { limit?: number; daysBack?: number } = {}) {
+  const res = await getNewReleasesFromFollowed(userId, {
+    limit: opts.limit ?? 12,
+    daysBack: opts.daysBack ?? 30,
+  });
+  return { ...res, source: "spotify-upcoming-releases" };
+}
+
 // ── Legacy app-level helpers (kept for backward compat within routes that don't have userId) ──
 
 /** App-level status (checks if app creds exist). */

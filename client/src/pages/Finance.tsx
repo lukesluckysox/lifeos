@@ -97,6 +97,24 @@ function usePortfolio() {
   };
 }
 
+/* ---------- Safe number formatting (defensive) ----------
+ * Plaid / Yahoo / our internal endpoints occasionally return null,
+ * undefined, or NaN for percentage/price fields. Calling `.toFixed`
+ * on undefined crashes the entire React tree (blank-screen bug seen
+ * after first brokerage connect). Use these helpers EVERYWHERE inside
+ * `.map(...)` callbacks. */
+function fixed(n: number | null | undefined, digits: number = 2): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return n.toFixed(digits);
+}
+function signedFixed(n: number | null | undefined, digits: number = 2): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `${n >= 0 ? "+" : ""}${n.toFixed(digits)}%`;
+}
+function safePct(n: number | null | undefined): number {
+  return n != null && Number.isFinite(n) ? n : 0;
+}
+
 /* ---------- Portfolio tab ---------- */
 
 function FinancePortfolio() {
@@ -109,7 +127,7 @@ function FinancePortfolio() {
   } = usePortfolio();
 
   const topConcentration = allocRows[0];
-  const biggestMover = [...allocRows].sort((a, b) => Math.abs(b.dayChangePct) - Math.abs(a.dayChangePct))[0];
+  const biggestMover = [...allocRows].sort((a, b) => Math.abs(safePct(b.dayChangePct)) - Math.abs(safePct(a.dayChangePct)))[0];
 
   /* Index comparison */
   const [indexSym, setIndexSym] = useState("SPY");
@@ -249,12 +267,12 @@ function FinancePortfolio() {
                   >
                     <div className="font-mono text-foreground font-medium w-16">{r.symbol}</div>
                     <div className="flex-1 min-w-0 text-xs text-muted-foreground truncate">{r.name}</div>
-                    <div className="font-mono tabular text-muted-foreground w-16 text-right">{r.weight.toFixed(1)}%</div>
-                    <div className={`font-mono tabular w-20 text-right ${r.dayChangePct >= 0 ? "text-teal" : "text-rose"}`}>
-                      {r.dayChangePct >= 0 ? "+" : ""}{r.dayChangePct.toFixed(2)}%
+                    <div className="font-mono tabular text-muted-foreground w-16 text-right">{fixed(r.weight, 1)}%</div>
+                    <div className={`font-mono tabular w-20 text-right ${safePct(r.dayChangePct) >= 0 ? "text-teal" : "text-rose"}`}>
+                      {signedFixed(r.dayChangePct)}
                     </div>
                     <div className="font-mono tabular w-24 text-right text-foreground">
-                      ${r.value.toLocaleString(undefined,{maximumFractionDigits:0})}
+                      ${(Number.isFinite(r.value) ? r.value : 0).toLocaleString(undefined,{maximumFractionDigits:0})}
                     </div>
                   </div>
                 ))}
@@ -418,9 +436,9 @@ function FinancePortfolio() {
                   <div className="font-mono w-16">{h.symbol}</div>
                   <div className="text-xs text-muted-foreground flex-1 min-w-0 truncate">{h.name}</div>
                   <div className="font-mono tabular text-xs text-muted-foreground w-20 text-right">{h.quantity} @ ${h.costBasis}</div>
-                  <div className="font-mono tabular w-24 text-right">${h.value.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
-                  <div className={`font-mono tabular w-20 text-right ${h.gainPct >= 0 ? "text-teal" : "text-rose"}`}>
-                    {h.gainPct >= 0 ? "+" : ""}{h.gainPct.toFixed(2)}%
+                  <div className="font-mono tabular w-24 text-right">${(Number.isFinite(h.value) ? h.value : 0).toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+                  <div className={`font-mono tabular w-20 text-right ${safePct(h.gainPct) >= 0 ? "text-teal" : "text-rose"}`}>
+                    {signedFixed(h.gainPct)}
                   </div>
                   <button
                     onClick={() => deleteHolding.mutate(h.id)}
@@ -669,9 +687,9 @@ function MoversColumn({ title, items, positive }: { title: string; items: MoverI
                 <div className="text-[11px] text-muted-foreground truncate" title={it.name}>{it.name}</div>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-mono tabular text-sm">${it.price.toFixed(2)}</div>
+                <div className="font-mono tabular text-sm">${fixed(it.price, 2)}</div>
                 <div className={`font-mono tabular text-[11px] ${color}`}>
-                  {it.dayChangePct >= 0 ? "+" : ""}{it.dayChangePct.toFixed(2)}%
+                  {signedFixed(it.dayChangePct)}
                 </div>
               </div>
             </li>
@@ -703,8 +721,8 @@ function AllocationBar({ rows }: { rows: { symbol: string; weight: number }[] })
           <div
             key={r.symbol}
             className={`${palette[i % palette.length]} transition-opacity hover:opacity-80`}
-            style={{ width: `${r.weight}%` }}
-            title={`${r.symbol} · ${r.weight.toFixed(1)}%`}
+            style={{ width: `${Number.isFinite(r.weight) ? r.weight : 0}%` }}
+            title={`${r.symbol} · ${fixed(r.weight, 1)}%`}
           />
         ))}
       </div>

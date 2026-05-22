@@ -606,7 +606,49 @@ export async function registerRoutes(
             } catch {}
           }
           if (allHoldings.length > 0) {
-            plaidData = { holdings: allHoldings, securities: allSecurities, source: "plaid-live" };
+            // Transform raw Plaid response into the shape the frontend
+            // expects. Plaid returns holdings keyed by security_id (no
+            // ticker/name) + a separate securities[] list — we have to
+            // join them and compute dayChangePct + gainPct ourselves.
+            // Without this transform, every field on the frontend ends
+            // up undefined and `.toFixed` crashes the whole page.
+            const secById = new Map<string, any>();
+            for (const s of allSecurities) secById.set(s.security_id, s);
+
+            const normalizedHoldings: any[] = allHoldings.map((h: any) => {
+              const sec = secById.get(h.security_id) || {};
+              const ticker = sec.ticker_symbol || sec.proxy_security_id || sec.security_id || "—";
+              const name = sec.name || ticker;
+              const quantity = Number(h.quantity) || 0;
+              const price = Number(h.institution_price ?? sec.close_price ?? 0) || 0;
+              const value = Number(h.institution_value ?? (quantity * price)) || 0;
+              const cost = Number(h.cost_basis ?? 0) * quantity || (quantity && h.cost_basis ? Number(h.cost_basis) * quantity : 0);
+              // Plaid doesn't give day change directly — try previous close
+              const prevClose = Number(sec.close_price ?? 0);
+              const dayChangePct = prevClose > 0 && price > 0
+                ? ((price - prevClose) / prevClose) * 100
+                : 0;
+              const gainPct = cost > 0 ? ((value - cost) / cost) * 100 : 0;
+              return { ticker, name, value, dayChangePct, gainPct, quantity, price };
+            });
+
+            const totalValue = normalizedHoldings.reduce((s, h) => s + h.value, 0);
+            const totalCost = normalizedHoldings.reduce((s, h) => s + (h.price && h.gainPct !== 0 ? h.value / (1 + h.gainPct / 100) : h.value), 0);
+            const totalGain = totalValue - totalCost;
+            const totalGainPct = totalCost > 0 ? (totalGain / totalCost) * 100 : 0;
+            const dayChange = normalizedHoldings.reduce((s, h) => s + (h.value * (h.dayChangePct / 100)), 0);
+            const dayChangePct = totalValue > 0 ? (dayChange / (totalValue - dayChange)) * 100 : 0;
+
+            plaidData = {
+              totalValue,
+              dayChange,
+              dayChangePct,
+              totalGain,
+              totalGainPct,
+              positions: normalizedHoldings.length,
+              holdings: normalizedHoldings,
+              source: "plaid-live",
+            };
           }
         }
       } catch {}
@@ -774,7 +816,17 @@ export async function registerRoutes(
       let snap: any;
       if (section === "top") snap = await Spotify.getTopTracks(userId, "short_term", 20);
       else if (section === "new") snap = await Spotify.getNewReleasesFromFollowed(userId, { limit: 20, daysBack: 60 });
+      // New genre-rollup sections — Music page redesign
+      else if (section === "recent-genre") snap = await Spotify.getRecentByGenre(userId, 50);
+      else if (section === "rotation-genre") snap = await Spotify.getRotationByGenre(userId, 50);
+      else if (section === "followed-artists") snap = await Spotify.getFollowedArtistsWithGenres(userId, 20);
+      else if (section === "upcoming-releases") snap = await Spotify.getUpcomingReleases(userId, { limit: 12, daysBack: 30 });
       else snap = await Spotify.getRecentlyPlayed(userId, 20);
+
+      // Genre/artist sections — no per-track reranking, return as-is.
+      if (section === "recent-genre" || section === "rotation-genre" || section === "followed-artists" || section === "upcoming-releases") {
+        return res.json(snap);
+      }
 
       const pinned = await storage.listUserItems(userId, "music");
       const pinnedTracks = pinned.map(p => ({

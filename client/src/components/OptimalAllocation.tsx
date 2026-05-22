@@ -250,12 +250,12 @@ export function OptimalAllocation({ holdings }: Props) {
                       />
                       <span className="font-mono text-foreground truncate">{s.symbol}</span>
                       <span className="font-mono tabular text-muted-foreground ml-auto">
-                        {(s.weight * 100).toFixed(1)}%
+                        {Number.isFinite(s.weight) ? (s.weight * 100).toFixed(1) : "0.0"}%
                       </span>
                       <span
-                        className={`font-mono tabular text-[10px] w-12 text-right ${delta >= 0 ? "text-teal" : "text-rose"}`}
+                        className={`font-mono tabular text-[10px] w-12 text-right ${(Number.isFinite(delta) ? delta : 0) >= 0 ? "text-teal" : "text-rose"}`}
                       >
-                        {delta >= 0 ? "+" : ""}{(delta * 100).toFixed(1)}
+                        {Number.isFinite(delta) ? `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}` : "0.0"}
                       </span>
                     </div>
                   );

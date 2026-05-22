@@ -1,28 +1,61 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, RefreshCw, Music as MusicIcon } from "lucide-react";
-import { SectionHeader } from "@/components/SectionHeader";
+import { ExternalLink, RefreshCw, Music as MusicIcon, Disc3, CalendarClock } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useMode } from "@/components/ModeProvider";
 
-interface Track {
+/* ─────────────────────────────────────────────────────────────────────── */
+/* Types                                                                   */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+interface GenreBucket {
+  genre: string;
+  count: number;
+  artists: Array<{ id: string; name: string; url?: string; image?: string }>;
+  lastPlayedAt?: string;
+  sampleTrack?: { name: string; artist: string; image?: string; url?: string };
+}
+
+interface GenreResp {
+  source: string;
+  genres?: GenreBucket[];
+  asOf?: string;
+}
+
+interface FollowedArtist {
+  id: string;
+  name: string;
+  url?: string;
+  image?: string;
+  genres: string[];
+  primaryGenre?: string;
+}
+
+interface FollowedResp {
+  source: string;
+  artists?: FollowedArtist[];
+  asOf?: string;
+}
+
+interface Release {
   id: string;
   name: string;
   artist: string;
   album?: string;
   image?: string;
-  playedAt?: string;
   releaseDate?: string;
   albumType?: string;
   url?: string;
-  pinned?: boolean;
 }
 
-interface MusicResp {
+interface ReleasesResp {
   source: string;
-  tracks: Track[];
+  tracks?: Release[];
   asOf?: string;
-  reason?: string;
 }
+
+/* ─────────────────────────────────────────────────────────────────────── */
+/* Helpers                                                                 */
+/* ─────────────────────────────────────────────────────────────────────── */
 
 function timeAgo(iso?: string) {
   if (!iso) return "";
@@ -40,92 +73,268 @@ function timeAgo(iso?: string) {
 
 function formatRelease(iso?: string) {
   if (!iso) return "";
-  // Spotify returns "YYYY-MM-DD" or "YYYY"
   try {
     const d = new Date(iso);
     if (isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   } catch {
     return iso;
   }
 }
 
-function TrackRow({ t }: { t: Track }) {
+/* ─────────────────────────────────────────────────────────────────────── */
+/* Sub-components                                                          */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+function GenreCard({ bucket, eyebrow }: { bucket: GenreBucket; eyebrow?: string }) {
+  return (
+    <div
+      className="rounded-lg border border-border bg-card/40 p-4 hover:border-border/80 transition-colors"
+      data-testid={`card-genre-${bucket.genre.toLowerCase().replace(/\s+/g, "-")}`}
+    >
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <div>
+          {eyebrow && (
+            <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/70 mb-1">
+              {eyebrow}
+            </div>
+          )}
+          <div
+            className="font-display text-base leading-tight"
+            data-testid={`text-genre-name-${bucket.genre.toLowerCase().replace(/\s+/g, "-")}`}
+          >
+            {bucket.genre}
+          </div>
+        </div>
+        <div className="font-mono text-[10px] text-muted-foreground tabular shrink-0">
+          {bucket.count} track{bucket.count > 1 ? "s" : ""}
+          {bucket.lastPlayedAt && <span className="mx-1.5">·</span>}
+          {bucket.lastPlayedAt && timeAgo(bucket.lastPlayedAt)}
+        </div>
+      </div>
+
+      {/* Sample artists row */}
+      {bucket.artists.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {bucket.artists.map((a) => (
+            <a
+              key={a.id}
+              href={a.url}
+              target={a.url ? "_blank" : undefined}
+              rel="noreferrer"
+              data-testid={`link-artist-${a.id}`}
+              className="inline-flex items-center gap-1.5 rounded-full bg-secondary/40 hover:bg-secondary/70 transition-colors px-2 py-1 text-xs"
+            >
+              {a.image ? (
+                <img src={a.image} alt="" className="w-4 h-4 rounded-full object-cover" />
+              ) : (
+                <span className="w-4 h-4 rounded-full bg-secondary/80 grid place-items-center">
+                  <MusicIcon size={8} className="text-muted-foreground" />
+                </span>
+              )}
+              <span className="truncate max-w-[120px]">{a.name}</span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      {/* Sample track preview */}
+      {bucket.sampleTrack && (
+        <div className="mt-3 pt-3 border-t border-border/40 text-[11px] text-muted-foreground/80 truncate">
+          <span className="text-muted-foreground/60">latest · </span>
+          {bucket.sampleTrack.url ? (
+            <a
+              href={bucket.sampleTrack.url}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-foreground transition-colors"
+            >
+              {bucket.sampleTrack.name}
+            </a>
+          ) : (
+            bucket.sampleTrack.name
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GenreGridSkeleton({ count = 4 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="rounded-lg border border-border bg-card/40 p-4 space-y-3">
+          <div className="h-4 w-20 bg-secondary/50 rounded animate-pulse" />
+          <div className="flex gap-1.5">
+            <div className="h-5 w-16 bg-secondary/50 rounded-full animate-pulse" />
+            <div className="h-5 w-20 bg-secondary/50 rounded-full animate-pulse" />
+            <div className="h-5 w-14 bg-secondary/50 rounded-full animate-pulse" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FollowedArtistRow({ artist }: { artist: FollowedArtist }) {
   return (
     <a
-      href={t.url}
-      target={t.url ? "_blank" : undefined}
+      href={artist.url}
+      target={artist.url ? "_blank" : undefined}
       rel="noreferrer"
-      data-testid={`row-track-${t.id}`}
-      className="flex items-center gap-4 px-4 py-3 hover:bg-accent/30 transition-colors group"
+      data-testid={`row-followed-${artist.id}`}
+      className="flex items-center gap-3 px-3 py-2 hover:bg-accent/30 transition-colors group rounded"
     >
-      {t.image ? (
-        <img src={t.image} alt="" className="w-12 h-12 rounded shrink-0 object-cover" />
+      {artist.image ? (
+        <img src={artist.image} alt="" className="w-9 h-9 rounded-full shrink-0 object-cover" />
       ) : (
-        <div className="w-12 h-12 rounded shrink-0 bg-secondary/50 grid place-items-center text-muted-foreground">
-          <MusicIcon size={16} />
+        <div className="w-9 h-9 rounded-full shrink-0 bg-secondary/50 grid place-items-center">
+          <MusicIcon size={12} className="text-muted-foreground" />
         </div>
       )}
       <div className="flex-1 min-w-0">
-        <div className="font-display text-sm leading-tight truncate">{t.name}</div>
-        <div className="text-xs text-muted-foreground truncate mt-0.5">
-          {t.artist}{t.album ? ` · ${t.album}` : ""}
-        </div>
+        <div className="font-display text-sm leading-tight truncate">{artist.name}</div>
+        {artist.primaryGenre && (
+          <div className="text-[10px] text-muted-foreground truncate mt-0.5 uppercase tracking-wider font-mono">
+            {artist.primaryGenre}
+          </div>
+        )}
       </div>
-      <div className="font-mono text-[10px] text-muted-foreground tabular shrink-0">
-        {t.playedAt ? timeAgo(t.playedAt) : formatRelease(t.releaseDate)}
-      </div>
-      {t.url && (
-        <ExternalLink size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+      {artist.url && (
+        <ExternalLink
+          size={11}
+          className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+        />
       )}
     </a>
   );
 }
 
-function EmptyState({ source }: { source: string }) {
-  if (source === "unauthorized") {
-    return (
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 text-sm text-muted-foreground" data-testid="text-music-unauth">
-        Connect Spotify to see real listening data. (Auth via the profile menu.)
-      </div>
-    );
-  }
+function ReleaseRow({ release }: { release: Release }) {
   return (
-    <div className="rounded-lg border border-border bg-card/40 px-5 py-4 text-sm text-muted-foreground">
-      Nothing surfaced yet. Listen to some tracks on Spotify and check back.
+    <a
+      href={release.url}
+      target={release.url ? "_blank" : undefined}
+      rel="noreferrer"
+      data-testid={`row-release-${release.id}`}
+      className="flex items-center gap-3 px-3 py-2 hover:bg-accent/30 transition-colors group rounded"
+    >
+      {release.image ? (
+        <img src={release.image} alt="" className="w-11 h-11 rounded shrink-0 object-cover" />
+      ) : (
+        <div className="w-11 h-11 rounded shrink-0 bg-secondary/50 grid place-items-center">
+          <Disc3 size={14} className="text-muted-foreground" />
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="font-display text-sm leading-tight truncate">{release.name}</div>
+        <div className="text-[11px] text-muted-foreground truncate mt-0.5">
+          {release.artist}
+          {release.albumType && (
+            <>
+              <span className="mx-1.5">·</span>
+              <span className="uppercase tracking-wider font-mono text-[9px]">
+                {release.albumType}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="font-mono text-[10px] text-muted-foreground tabular shrink-0">
+        {formatRelease(release.releaseDate)}
+      </div>
+    </a>
+  );
+}
+
+function SidebarSkeleton() {
+  return (
+    <div className="space-y-1">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-3 py-2">
+          <div className="w-9 h-9 rounded-full bg-secondary/50 animate-pulse" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 w-2/3 bg-secondary/50 rounded animate-pulse" />
+            <div className="h-2 w-1/3 bg-secondary/40 rounded animate-pulse" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
+
+function EmptyHint({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-card/40 px-4 py-3 text-xs text-muted-foreground">
+      {message}
+    </div>
+  );
+}
+
+function UnauthorizedHint() {
+  return (
+    <div
+      className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 text-sm text-muted-foreground"
+      data-testid="text-music-unauth"
+    >
+      Connect Spotify to see your music. (Auth via the profile menu.)
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────── */
+/* Page                                                                    */
+/* ─────────────────────────────────────────────────────────────────────── */
 
 export default function Music() {
   const qc = useQueryClient();
   const { mode, withMode } = useMode();
 
-  const recent = useQuery<MusicResp>({
-    queryKey: ["/api/music-recs", "recent", mode],
-    queryFn: async () => (await apiRequest("GET", withMode(`/api/music-recs?section=recent`))).json(),
+  const recentGenre = useQuery<GenreResp>({
+    queryKey: ["/api/music-recs", "recent-genre", mode],
+    queryFn: async () =>
+      (await apiRequest("GET", withMode(`/api/music-recs?section=recent-genre`))).json(),
   });
-  const top = useQuery<MusicResp>({
-    queryKey: ["/api/music-recs", "top", mode],
-    queryFn: async () => (await apiRequest("GET", withMode(`/api/music-recs?section=top`))).json(),
+  const rotationGenre = useQuery<GenreResp>({
+    queryKey: ["/api/music-recs", "rotation-genre", mode],
+    queryFn: async () =>
+      (await apiRequest("GET", withMode(`/api/music-recs?section=rotation-genre`))).json(),
   });
-  const newRel = useQuery<MusicResp>({
-    queryKey: ["/api/music-recs", "new", mode],
-    queryFn: async () => (await apiRequest("GET", withMode(`/api/music-recs?section=new`))).json(),
+  const followed = useQuery<FollowedResp>({
+    queryKey: ["/api/music-recs", "followed-artists", mode],
+    queryFn: async () =>
+      (await apiRequest("GET", withMode(`/api/music-recs?section=followed-artists`))).json(),
+  });
+  const upcoming = useQuery<ReleasesResp>({
+    queryKey: ["/api/music-recs", "upcoming-releases", mode],
+    queryFn: async () =>
+      (await apiRequest("GET", withMode(`/api/music-recs?section=upcoming-releases`))).json(),
   });
 
-  const refreshAll = () => {
-    qc.invalidateQueries({ queryKey: ["/api/music-recs"] });
-  };
+  const refreshAll = () => qc.invalidateQueries({ queryKey: ["/api/music-recs"] });
+
+  const isAnyUnauthorized =
+    recentGenre.data?.source === "unauthorized" ||
+    rotationGenre.data?.source === "unauthorized" ||
+    followed.data?.source === "unauthorized" ||
+    upcoming.data?.source === "unauthorized";
+
+  const isFetching =
+    recentGenre.isFetching ||
+    rotationGenre.isFetching ||
+    followed.isFetching ||
+    upcoming.isFetching;
 
   return (
-    <div className="space-y-14 animate-fade-in">
+    <div className="space-y-12 animate-fade-in">
+      {/* Header */}
       <section>
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="eyebrow mb-3">Music</div>
             <h1 className="font-display text-[clamp(1.875rem,3.5vw,2.75rem)] leading-[1.02] tracking-tight">
-              What you've been listening to, and what's new from the artists you follow.
+              What you've been on — rolled up by genre, with what's coming next.
             </h1>
           </div>
           <button
@@ -134,92 +343,111 @@ export default function Music() {
             onClick={refreshAll}
             className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded border border-border"
           >
-            <RefreshCw size={12} className={recent.isFetching || top.isFetching || newRel.isFetching ? "animate-spin" : ""} />
+            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
             Refresh
           </button>
         </div>
       </section>
 
-      {/* Recently played */}
-      <section>
-        <SectionHeader
-          eyebrow="Recently played"
-          title="Your last 20 tracks"
-          description={recent.data?.asOf ? `source · ${recent.data.source} · ${timeAgo(recent.data.asOf)}` : "Live from Spotify."}
-        />
-        {recent.isLoading ? (
-          <div className="rounded-lg border border-border bg-card/40 divide-y divide-border">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-4 py-3">
-                <div className="w-12 h-12 rounded bg-secondary/50 animate-pulse" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-3 w-2/3 bg-secondary/50 rounded animate-pulse" />
-                  <div className="h-2 w-1/2 bg-secondary/40 rounded animate-pulse" />
-                </div>
+      {isAnyUnauthorized && <UnauthorizedHint />}
+
+      {/* Top row: Followed artists (left) | Upcoming releases (right) */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Followed artists */}
+        <div data-testid="section-followed-artists">
+          <div className="flex items-baseline justify-between gap-3 mb-3 px-1">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+                Artists you follow
               </div>
-            ))}
+              <h2 className="font-display text-lg leading-tight mt-1">Your library</h2>
+            </div>
+            <span className="font-mono text-[10px] text-muted-foreground tabular shrink-0">
+              {followed.data?.artists?.length ?? 0} artists
+            </span>
           </div>
-        ) : (recent.data?.tracks ?? []).length === 0 ? (
-          <EmptyState source={recent.data?.source ?? "none"} />
+          <div className="rounded-lg border border-border bg-card/40 p-1.5 max-h-[420px] overflow-y-auto">
+            {followed.isLoading ? (
+              <SidebarSkeleton />
+            ) : (followed.data?.artists ?? []).length === 0 ? (
+              <EmptyHint message="No followed artists yet. Follow some on Spotify and refresh." />
+            ) : (
+              <div className="space-y-0.5">
+                {followed.data!.artists!.map((a) => (
+                  <FollowedArtistRow key={a.id} artist={a} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Upcoming releases */}
+        <div data-testid="section-upcoming-releases">
+          <div className="flex items-baseline justify-between gap-3 mb-3 px-1">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+                <CalendarClock size={10} className="inline mr-1 -mt-px" />
+                Scheduled / recent
+              </div>
+              <h2 className="font-display text-lg leading-tight mt-1">Upcoming releases</h2>
+            </div>
+            <span className="font-mono text-[10px] text-muted-foreground tabular shrink-0">
+              last 30 days
+            </span>
+          </div>
+          <div className="rounded-lg border border-border bg-card/40 p-1.5 max-h-[420px] overflow-y-auto">
+            {upcoming.isLoading ? (
+              <SidebarSkeleton />
+            ) : (upcoming.data?.tracks ?? []).length === 0 ? (
+              <EmptyHint message="No new releases from your followed artists in the last 30 days." />
+            ) : (
+              <div className="space-y-0.5">
+                {upcoming.data!.tracks!.map((r) => (
+                  <ReleaseRow key={r.id} release={r} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Bottom row: genre rollups */}
+      <section>
+        <div className="mb-4 px-1">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+            Last played
+          </div>
+          <h2 className="font-display text-lg leading-tight mt-1">By genre</h2>
+        </div>
+        {recentGenre.isLoading ? (
+          <GenreGridSkeleton />
+        ) : (recentGenre.data?.genres ?? []).length === 0 ? (
+          <EmptyHint message="No recent listening data yet. Play some tracks on Spotify and check back." />
         ) : (
-          <div className="rounded-lg border border-border bg-card/40 divide-y divide-border">
-            {recent.data!.tracks.map(t => <TrackRow key={t.id} t={t} />)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {recentGenre.data!.genres!.map((b) => (
+              <GenreCard key={`recent-${b.genre}`} bucket={b} />
+            ))}
           </div>
         )}
       </section>
 
-      {/* Top tracks */}
       <section>
-        <SectionHeader
-          eyebrow="Top tracks"
-          title="On rotation, last 4 weeks"
-          description={top.data?.asOf ? `source · ${top.data.source}` : "Spotify short-term top."}
-        />
-        {top.isLoading ? (
-          <div className="rounded-lg border border-border bg-card/40 divide-y divide-border">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-4 py-3">
-                <div className="w-12 h-12 rounded bg-secondary/50 animate-pulse" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-3 w-2/3 bg-secondary/50 rounded animate-pulse" />
-                  <div className="h-2 w-1/2 bg-secondary/40 rounded animate-pulse" />
-                </div>
-              </div>
-            ))}
+        <div className="mb-4 px-1">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
+            On rotation · last 4 weeks
           </div>
-        ) : (top.data?.tracks ?? []).length === 0 ? (
-          <EmptyState source={top.data?.source ?? "none"} />
+          <h2 className="font-display text-lg leading-tight mt-1">By genre</h2>
+        </div>
+        {rotationGenre.isLoading ? (
+          <GenreGridSkeleton />
+        ) : (rotationGenre.data?.genres ?? []).length === 0 ? (
+          <EmptyHint message="Not enough listening history yet for rotation stats." />
         ) : (
-          <div className="rounded-lg border border-border bg-card/40 divide-y divide-border">
-            {top.data!.tracks.map(t => <TrackRow key={t.id} t={t} />)}
-          </div>
-        )}
-      </section>
-
-      {/* New releases from followed artists */}
-      <section>
-        <SectionHeader
-          eyebrow="New releases"
-          title="From artists you follow"
-          description="Albums and singles released in the last 60 days, sorted by date."
-        />
-        {newRel.isLoading ? (
-          <div className="rounded-lg border border-border bg-card/40 divide-y divide-border">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-4 py-3">
-                <div className="w-12 h-12 rounded bg-secondary/50 animate-pulse" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-3 w-2/3 bg-secondary/50 rounded animate-pulse" />
-                  <div className="h-2 w-1/2 bg-secondary/40 rounded animate-pulse" />
-                </div>
-              </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {rotationGenre.data!.genres!.map((b) => (
+              <GenreCard key={`rotation-${b.genre}`} bucket={b} />
             ))}
-          </div>
-        ) : (newRel.data?.tracks ?? []).length === 0 ? (
-          <EmptyState source={newRel.data?.source ?? "none"} />
-        ) : (
-          <div className="rounded-lg border border-border bg-card/40 divide-y divide-border">
-            {newRel.data!.tracks.map(t => <TrackRow key={t.id} t={t} />)}
           </div>
         )}
       </section>
