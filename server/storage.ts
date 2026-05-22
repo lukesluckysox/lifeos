@@ -13,10 +13,20 @@ import type {
 } from '@shared/schema';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
+import { mkdirSync } from "fs";
+import { dirname } from "path";
 import { eq, and, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-const sqlite = new Database("data.db");
+// Resolve DB path:
+//  - Production (Railway): point DB_PATH at a persistent volume
+//    (e.g. DB_PATH=/data/data.db with a volume mounted at /data).
+//    Without this, EVERY redeploy wipes data.db — sessions, manual
+//    holdings, Plaid item references, watchlist, all gone.
+//  - Local dev: defaults to ./data.db in the working directory.
+const DB_PATH = process.env.DB_PATH || "data.db";
+try { mkdirSync(dirname(DB_PATH), { recursive: true }); } catch {}
+const sqlite = new Database(DB_PATH);
 sqlite.pragma("journal_mode = WAL");
 
 // ──────────────────────────────────────────────────────────────────────────────
