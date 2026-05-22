@@ -1332,6 +1332,97 @@ export async function registerRoutes(
   });
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Sentiment engine
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // In-memory cache: `${symbol}:${weeks}` → { data, expiresAt }
+  const sentimentCache = new Map<string, { data: SentimentResult; expiresAt: number }>();
+  const SENTIMENT_TTL = 5 * 60 * 1000; // 5 minutes
+
+  interface SentimentResult {
+    symbol: string;
+    currentPrice: number | null;
+    returnPct: number | null;
+    sentiment: number;
+    label: string;
+  }
+
+  function scoreToLabel(s: number): string {
+    if (s >= 0.75) return "Strong Bullish";
+    if (s >= 0.25) return "Bullish";
+    if (s > -0.25) return "Neutral";
+    if (s > -0.75) return "Bearish";
+    return "Strong Bearish";
+  }
+
+  function returnPctToSentiment(pct: number): number {
+    if (pct >= 30) return 1.0;
+    if (pct >= 5) return 0.5;
+    if (pct > -5) return 0.0;
+    if (pct > -30) return -0.5;
+    return -1.0;
+  }
+
+  async function fetchSentiment(symbol: string, weeks: number): Promise<SentimentResult> {
+    const cacheKey = `${symbol}:${weeks}`;
+    const cached = sentimentCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) return cached.data;
+
+    try {
+      const range = `${weeks}wk`;
+      const r = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=1d`,
+        { headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      if (!r.ok) throw new Error(`Yahoo ${r.status}`);
+      const data = await r.json();
+      const result = data?.chart?.result?.[0];
+      if (!result) throw new Error("no result");
+      const meta = result.meta;
+      const closes: number[] = (result.indicators?.quote?.[0]?.close ?? []).filter((c: any) => c != null);
+      if (!closes.length) throw new Error("no closes");
+      const first = closes[0];
+      const last = meta.regularMarketPrice ?? closes[closes.length - 1];
+      const returnPct = first > 0 ? ((last - first) / first) * 100 : 0;
+      const sentiment = returnPctToSentiment(returnPct);
+      const out: SentimentResult = {
+        symbol,
+        currentPrice: last,
+        returnPct,
+        sentiment,
+        label: scoreToLabel(sentiment),
+      };
+      sentimentCache.set(cacheKey, { data: out, expiresAt: Date.now() + SENTIMENT_TTL });
+      return out;
+    } catch {
+      const out: SentimentResult = { symbol, currentPrice: null, returnPct: null, sentiment: 0, label: "Neutral" };
+      return out;
+    }
+  }
+
+  app.get("/api/sentiment/:symbol", async (req, res) => {
+    const symbol = req.params.symbol.toUpperCase();
+    const weeks = Math.max(1, Math.min(52, parseInt((req.query.weeks as string) || "13", 10) || 13));
+    try {
+      const out = await fetchSentiment(symbol, weeks);
+      res.json(out);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/sentiment/batch", async (req, res) => {
+    const { symbols, weeks: rawWeeks } = req.body || {};
+    if (!Array.isArray(symbols)) return res.status(400).json({ message: "symbols array required" });
+    const weeks = Math.max(1, Math.min(52, parseInt(String(rawWeeks || 13), 10) || 13));
+    const uniq = Array.from(new Set((symbols as string[]).map((s) => String(s).toUpperCase()).filter(Boolean)));
+    const results = await Promise.all(
+      uniq.map((sym) => fetchSentiment(sym, weeks).catch(() => null))
+    );
+    res.json(results.filter(Boolean));
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Rec feedback
   // ══════════════════════════════════════════════════════════════════════════
 

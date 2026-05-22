@@ -12,6 +12,8 @@ import { Link } from "wouter";
 import { PillTabs } from "@/components/PillTabs";
 import { useTabParam } from "@/hooks/useTabParam";
 import Subscriptions from "@/pages/Subscriptions";
+import { LookbackProvider } from "@/components/LookbackContext";
+import { SentimentEngine } from "@/components/SentimentEngine";
 
 /* ---------- Types ---------- */
 
@@ -149,7 +151,13 @@ function FinanceMain() {
 
   const indexOptions = ["SPY", "QQQ", "VTI", "VOO", "BTC", "ETH", "SOL"];
 
+  const sentimentHoldings = [
+    ...plaidHoldings.map(h => ({ symbol: h.ticker })),
+    ...manualHoldings.map(h => ({ symbol: h.symbol })),
+  ];
+
   return (
+    <LookbackProvider>
     <div className="space-y-16 animate-fade-in">
       {/* ============ Net worth headline ============ */}
       <section>
@@ -185,6 +193,9 @@ function FinanceMain() {
       </section>
 
       <div className="hairline" />
+
+      {/* ============ Sentiment engine ============ */}
+      <SentimentEngine holdings={sentimentHoldings} />
 
       {/* ============ Plaid brokerage connect ============ */}
       {mode !== "demo" && <PlaidConnect />}
@@ -564,6 +575,7 @@ function FinanceMain() {
         </Link>
       </section>
     </div>
+    </LookbackProvider>
   );
 }
 
