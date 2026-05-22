@@ -221,7 +221,7 @@ export function PlaidConnect() {
         <div>
           <div className="font-display text-base">Connect your brokerage</div>
           <div className="text-xs text-muted-foreground mt-1 leading-relaxed max-w-md">
-            Link your investment accounts via Plaid to see your real portfolio instead of demo data.
+            Link your investment accounts via Plaid to see your real portfolio instead of demo data. Connect as many as you want — one bank at a time, then come back and link another.
           </div>
         </div>
         <PlaidLinkButton onSuccess={handlePlaidSuccess} disabled={exchangeMutation.isPending} />
@@ -235,29 +235,35 @@ export function PlaidConnect() {
     );
   }
 
-  // Items connected — show collapsed list
+  // Items connected — show list + explicit "Add another" affordance
   return (
-    <div className="rounded-lg border border-teal/30 bg-teal/5 p-4 space-y-3" data-testid="section-plaid-connected">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-teal">
-          <Building2 size={14} />
-          <span>{items.length} brokerage{items.length > 1 ? "s" : ""} connected</span>
+    <div className="rounded-lg border border-teal/30 bg-teal/5 p-5 space-y-4" data-testid="section-plaid-connected">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 text-sm text-teal font-medium">
+            <Building2 size={14} />
+            <span data-testid="text-brokerages-count">
+              {items.length} brokerage{items.length > 1 ? "s" : ""} connected
+            </span>
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-1">
+            Link as many investment accounts as you like — Fidelity, Schwab, Robinhood, Coinbase, all welcome.
+          </div>
         </div>
-        <PlaidLinkButton onSuccess={handlePlaidSuccess} disabled={exchangeMutation.isPending} />
       </div>
       <ul className="space-y-1.5">
         {items.map(item => (
-          <li key={item.id} className="flex items-center justify-between text-xs text-muted-foreground">
+          <li key={item.id} className="flex items-center justify-between text-xs text-muted-foreground py-1">
             <span className="flex items-center gap-1.5">
               <Building2 size={10} className="text-teal/60" />
-              {item.institutionName || "Unknown institution"}
+              <span data-testid={`text-brokerage-name-${item.id}`}>{item.institutionName || "Unknown institution"}</span>
             </span>
             <button
               type="button"
               data-testid={`button-plaid-disconnect-${item.id}`}
               onClick={() => deleteMutation.mutate(item.itemId)}
               disabled={deleteMutation.isPending}
-              className="text-muted-foreground/60 hover:text-red-400 transition-colors"
+              className="text-muted-foreground/60 hover:text-red-400 transition-colors p-1"
               aria-label="Disconnect"
             >
               <Trash2 size={11} />
@@ -265,6 +271,16 @@ export function PlaidConnect() {
           </li>
         ))}
       </ul>
+      <div className="pt-3 border-t border-teal/20 flex items-center justify-between gap-3 flex-wrap">
+        <span className="text-[11px] text-muted-foreground">Have another account at a different bank?</span>
+        <PlaidLinkButton onSuccess={handlePlaidSuccess} disabled={exchangeMutation.isPending} />
+      </div>
+      {exchangeMutation.isPending && (
+        <p className="text-xs text-muted-foreground">Connecting account…</p>
+      )}
+      {exchangeMutation.isError && (
+        <p className="text-xs text-red-400">Connection failed. Try again.</p>
+      )}
     </div>
   );
 }
