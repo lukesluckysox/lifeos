@@ -51,13 +51,27 @@ function getClient(): PlaidApi {
 /** Create a link token for the Plaid Link flow. */
 export async function createLinkToken(userId: number): Promise<string> {
   const client = getClient();
-  const response = await client.linkTokenCreate({
+
+  // For OAuth-based banks (Chase, BoA, Wells Fargo, etc.) Plaid requires a
+  // redirect_uri registered in the Plaid dashboard. Without it, the OAuth
+  // bank flow returns to a Plaid-hosted page that can't navigate back into
+  // the SPA, leaving the user on a blank screen. PUBLIC_URL is set in
+  // Railway env vars (e.g. https://thelifeos.up.railway.app).
+  const publicUrl = process.env.PUBLIC_URL?.replace(/\/$/, "");
+  const redirectUri = publicUrl ? `${publicUrl}/#/finance` : undefined;
+
+  const params: any = {
     user: { client_user_id: userId.toString() },
     client_name: "Life OS",
     products: [Products.Investments, Products.Transactions],
     country_codes: [CountryCode.Us],
     language: "en",
-  });
+  };
+  if (redirectUri) {
+    params.redirect_uri = redirectUri;
+  }
+
+  const response = await client.linkTokenCreate(params);
   return response.data.link_token;
 }
 

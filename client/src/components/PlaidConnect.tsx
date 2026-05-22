@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePlaidLink } from "react-plaid-link";
 import { Building2, Trash2, Plus, AlertCircle } from "lucide-react";
@@ -15,6 +15,11 @@ function PlaidLinkButton({ onSuccess, disabled }: { onSuccess: (publicToken: str
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // If we're returning from a Plaid OAuth flow, the URL will contain
+  // ?oauth_state_id=... — we need to re-initialize Plaid Link with the
+  // original token + the current URL so it can resume.
+  const isOAuthReturn = typeof window !== "undefined" && /[?&]oauth_state_id=/.test(window.location.search + window.location.hash);
+
   const fetchLinkToken = useCallback(async () => {
     try {
       const res = await apiRequest("POST", "/api/plaid/link-token");
@@ -26,26 +31,53 @@ function PlaidLinkButton({ onSuccess, disabled }: { onSuccess: (publicToken: str
     }
   }, []);
 
-  const { open, ready } = usePlaidLink({
+  const [autoOpened, setAutoOpened] = useState(false);
+
+  const { open, ready, error: linkError } = usePlaidLink({
     token: linkToken || "",
+    receivedRedirectUri: isOAuthReturn ? window.location.href : undefined,
     onSuccess: (publicToken, metadata) => {
       const institutionName = metadata.institution?.name || "Unknown";
       onSuccess(publicToken, institutionName);
-      setLinkToken(null); // reset after use
+      setLinkToken(null);
+      setAutoOpened(false);
     },
-    onExit: () => { setLinkToken(null); },
+    onExit: (err) => {
+      if (err) console.error("[plaid-link-exit]", err);
+      setLinkToken(null);
+      setAutoOpened(false);
+    },
+    onEvent: (eventName) => {
+      // Useful for debugging the blue-screen case
+      if (eventName === "ERROR" || eventName === "EXIT") {
+        console.log("[plaid-link-event]", eventName);
+      }
+    },
   });
+
+  // Auto-open when token is ready — but ONLY ONCE per token (not every render)
+  useEffect(() => {
+    if (linkToken && ready && !autoOpened) {
+      setAutoOpened(true);
+      open();
+    }
+  }, [linkToken, ready, autoOpened, open]);
+
+  // Surface Plaid initialization errors instead of going blank
+  useEffect(() => {
+    if (linkError) {
+      setFetchError(linkError.message || "Plaid Link failed to initialize");
+      setLinkToken(null);
+      setAutoOpened(false);
+    }
+  }, [linkError]);
 
   const handleClick = async () => {
     if (!linkToken) {
+      setAutoOpened(false);
       await fetchLinkToken();
     }
   };
-
-  // Auto-open when token is ready
-  if (linkToken && ready) {
-    open();
-  }
 
   if (fetchError) {
     return (
