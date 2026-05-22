@@ -88,8 +88,17 @@ function redirectPlaidOAuthIfPresent() {
   const params = new URLSearchParams(window.location.search);
   const oauthStateId = params.get("oauth_state_id");
   if (!oauthStateId) return;
-  // Already on the finance hash route? Just clear the leading search so
-  // we don't double-redirect on every hashchange.
+
+  // CRITICAL: capture the ORIGINAL href before we rewrite it. Plaid Link's
+  // receivedRedirectUri must EXACTLY match the redirect_uri registered in
+  // the Plaid Dashboard (e.g. https://thelifeos.up.railway.app/?oauth_state_id=xxx).
+  // If we pass the rewritten URL (with #/finance), Plaid rejects it and
+  // renders blank — the dreaded blue screen.
+  //
+  // Stash on window so PlaidConnect can read it after React mounts.
+  // (No localStorage — sandbox blocks it.)
+  (window as any).__plaidOriginalRedirectUri = window.location.href;
+
   const target = `#/finance?oauth_state_id=${encodeURIComponent(oauthStateId)}`;
   window.history.replaceState(null, "", window.location.pathname + target);
   window.dispatchEvent(new HashChangeEvent("hashchange"));

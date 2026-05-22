@@ -211,27 +211,39 @@ function PlaidLinkMounted({
   disabled?: boolean;
 }) {
 
+  // CRITICAL: receivedRedirectUri must EXACTLY match the redirect_uri
+  // registered in the Plaid Dashboard (bare origin + ?oauth_state_id=xxx).
+  // App.tsx stashes the original href on window before rewriting the URL
+  // to /#/finance — we read it back here. Passing the rewritten
+  // /#/finance URL would make Plaid render blank.
+  const originalRedirectUri =
+    typeof window !== "undefined"
+      ? ((window as any).__plaidOriginalRedirectUri as string | undefined)
+      : undefined;
+
   const { open, ready, error: linkError } = usePlaidLink({
     token: linkToken,
-    // Critical for OAuth resume — pass the full current URL so Plaid Link
-    // can pick up oauth_state_id and complete the flow.
-    receivedRedirectUri: isOAuthReturn ? window.location.href : undefined,
+    receivedRedirectUri: isOAuthReturn
+      ? (originalRedirectUri || window.location.href)
+      : undefined,
     onSuccess: (publicToken, metadata) => {
       const institutionName = metadata.institution?.name || "Unknown";
       onSuccess(publicToken, institutionName);
-      // Clean up the oauth_state_id from URL so the next mount doesn't
-      // try to resume again.
+      // Clean up the oauth_state_id from URL + stashed redirect so the
+      // next mount doesn't try to resume again.
       if (isOAuthReturn && typeof window !== "undefined") {
-        const cleanUrl = window.location.pathname + window.location.hash;
-        window.history.replaceState(null, "", cleanUrl);
+        const hashClean = window.location.hash.split("?")[0] || "#/finance";
+        window.history.replaceState(null, "", window.location.pathname + hashClean);
+        delete (window as any).__plaidOriginalRedirectUri;
       }
     },
     onExit: (err) => {
       if (err) console.error("[plaid-link-exit]", err);
       onExit();
       if (isOAuthReturn && typeof window !== "undefined") {
-        const cleanUrl = window.location.pathname + window.location.hash;
-        window.history.replaceState(null, "", cleanUrl);
+        const hashClean = window.location.hash.split("?")[0] || "#/finance";
+        window.history.replaceState(null, "", window.location.pathname + hashClean);
+        delete (window as any).__plaidOriginalRedirectUri;
       }
     },
     onEvent: (eventName) => {
