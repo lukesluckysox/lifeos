@@ -53,12 +53,19 @@ export async function createLinkToken(userId: number): Promise<string> {
   const client = getClient();
 
   // For OAuth-based banks (Chase, BoA, Wells Fargo, etc.) Plaid requires a
-  // redirect_uri registered in the Plaid dashboard. Without it, the OAuth
-  // bank flow returns to a Plaid-hosted page that can't navigate back into
-  // the SPA, leaving the user on a blank screen. PUBLIC_URL is set in
-  // Railway env vars (e.g. https://thelifeos.up.railway.app).
-  const publicUrl = process.env.PUBLIC_URL?.replace(/\/$/, "");
-  const redirectUri = publicUrl ? `${publicUrl}/#/finance` : undefined;
+  // redirect_uri that has been registered in the Plaid Dashboard under
+  // "Allowed redirect URIs". If you haven't whitelisted the URI, Plaid
+  // returns a 400 on linkTokenCreate — so we ONLY include redirect_uri
+  // when PLAID_REDIRECT_URI is explicitly set in env. Sandbox flows work
+  // fine without it.
+  //
+  // To enable OAuth banks:
+  //   1. Add the URI to Plaid Dashboard → Team Settings → API
+  //      → Allowed redirect URIs (e.g. https://thelifeos.up.railway.app/)
+  //      Plaid does NOT accept fragments (#/finance) — use the bare origin
+  //      with a trailing slash.
+  //   2. Set PLAID_REDIRECT_URI to the same value in Railway env vars.
+  const redirectUri = process.env.PLAID_REDIRECT_URI;
 
   const params: any = {
     user: { client_user_id: userId.toString() },
@@ -71,8 +78,20 @@ export async function createLinkToken(userId: number): Promise<string> {
     params.redirect_uri = redirectUri;
   }
 
-  const response = await client.linkTokenCreate(params);
-  return response.data.link_token;
+  try {
+    const response = await client.linkTokenCreate(params);
+    return response.data.link_token;
+  } catch (err: any) {
+    // Plaid SDK wraps real errors inside err.response.data — surface them
+    // so we don't lose the actual error_code/error_message in the logs.
+    const plaidErr = err?.response?.data;
+    if (plaidErr) {
+      console.error("[plaid] linkTokenCreate failed:", JSON.stringify(plaidErr));
+      const msg = plaidErr.error_message || plaidErr.error_code || "Plaid request failed";
+      throw new Error(msg);
+    }
+    throw err;
+  }
 }
 
 /** Exchange a public token (from Plaid Link) for an access token. */
