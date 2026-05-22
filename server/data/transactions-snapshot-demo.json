@@ -1,0 +1,20 @@
+{
+  "source": "demo",
+  "asOf": "2026-05-20",
+  "transactions": [
+    { "date": "2026-05-18", "merchant": "Spotify Premium", "amount": 11.99, "category": "Subscription" },
+    { "date": "2026-04-18", "merchant": "Spotify Premium", "amount": 11.99, "category": "Subscription" },
+    { "date": "2026-03-18", "merchant": "Spotify Premium", "amount": 11.99, "category": "Subscription" },
+    { "date": "2026-05-15", "merchant": "Netflix", "amount": 17.99, "category": "Subscription" },
+    { "date": "2026-04-15", "merchant": "Netflix", "amount": 17.99, "category": "Subscription" },
+    { "date": "2026-03-15", "merchant": "Netflix", "amount": 17.99, "category": "Subscription" },
+    { "date": "2026-05-10", "merchant": "NYTimes Digital", "amount": 4.25, "category": "Subscription" },
+    { "date": "2026-04-10", "merchant": "NYTimes Digital", "amount": 4.25, "category": "Subscription" },
+    { "date": "2026-03-10", "merchant": "NYTimes Digital", "amount": 4.25, "category": "Subscription" },
+    { "date": "2026-05-02", "merchant": "Apple One", "amount": 19.95, "category": "Subscription" },
+    { "date": "2026-04-02", "merchant": "Apple One", "amount": 19.95, "category": "Subscription" },
+    { "date": "2026-03-02", "merchant": "Apple One", "amount": 19.95, "category": "Subscription" },
+    { "date": "2026-05-11", "merchant": "Whole Foods", "amount": 142.30, "category": "Groceries" },
+    { "date": "2026-05-09", "merchant": "Shell", "amount": 48.00, "category": "Gas" }
+  ]
+}

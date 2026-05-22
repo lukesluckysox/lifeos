@@ -1,0 +1,28 @@
+{
+  "source": "plaid-snapshot",
+  "asOf": "2026-05-20",
+  "transactions": [
+    { "date": "2026-05-18", "merchant": "Spotify USA", "amount": 11.99, "category": "Subscription" },
+    { "date": "2026-04-18", "merchant": "Spotify USA", "amount": 11.99, "category": "Subscription" },
+    { "date": "2026-03-18", "merchant": "Spotify USA", "amount": 11.99, "category": "Subscription" },
+    { "date": "2026-05-15", "merchant": "Netflix.com", "amount": 22.99, "category": "Subscription" },
+    { "date": "2026-04-15", "merchant": "Netflix.com", "amount": 22.99, "category": "Subscription" },
+    { "date": "2026-03-15", "merchant": "Netflix.com", "amount": 22.99, "category": "Subscription" },
+    { "date": "2026-05-12", "merchant": "Anthropic Claude", "amount": 20.00, "category": "Subscription" },
+    { "date": "2026-04-12", "merchant": "Anthropic Claude", "amount": 20.00, "category": "Subscription" },
+    { "date": "2026-03-12", "merchant": "Anthropic Claude", "amount": 20.00, "category": "Subscription" },
+    { "date": "2026-05-05", "merchant": "Railway.app", "amount": 5.00, "category": "Subscription" },
+    { "date": "2026-04-05", "merchant": "Railway.app", "amount": 5.00, "category": "Subscription" },
+    { "date": "2026-03-05", "merchant": "Railway.app", "amount": 5.00, "category": "Subscription" },
+    { "date": "2026-05-01", "merchant": "GitHub Copilot", "amount": 10.00, "category": "Subscription" },
+    { "date": "2026-04-01", "merchant": "GitHub Copilot", "amount": 10.00, "category": "Subscription" },
+    { "date": "2026-03-01", "merchant": "GitHub Copilot", "amount": 10.00, "category": "Subscription" },
+    { "date": "2026-04-22", "merchant": "iCloud+ 200GB", "amount": 2.99, "category": "Subscription" },
+    { "date": "2026-03-22", "merchant": "iCloud+ 200GB", "amount": 2.99, "category": "Subscription" },
+    { "date": "2026-02-22", "merchant": "iCloud+ 200GB", "amount": 2.99, "category": "Subscription" },
+    { "date": "2026-05-10", "merchant": "Foodland Honolulu", "amount": 87.45, "category": "Groceries" },
+    { "date": "2026-05-08", "merchant": "Chevron Kailua", "amount": 52.10, "category": "Gas" },
+    { "date": "2026-05-03", "merchant": "Costco Wholesale", "amount": 312.88, "category": "Groceries" },
+    { "date": "2026-04-28", "merchant": "Amazon.com", "amount": 41.99, "category": "Shopping" }
+  ]
+}

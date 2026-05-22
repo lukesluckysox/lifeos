@@ -1,0 +1,95 @@
+{
+  "source": "demo",
+  "tracks": [
+    {
+      "id": "demo-1",
+      "name": "Levitating",
+      "artist": "Dua Lipa",
+      "album": "Future Nostalgia",
+      "popularity": 89,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b27382b243023e937fd5b41f0bb8",
+      "url": "https://open.spotify.com/track/463CkQjx2Zk1yXoBuierM9"
+    },
+    {
+      "id": "demo-2",
+      "name": "Blinding Lights",
+      "artist": "The Weeknd",
+      "album": "After Hours",
+      "popularity": 91,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36",
+      "url": "https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b"
+    },
+    {
+      "id": "demo-3",
+      "name": "As It Was",
+      "artist": "Harry Styles",
+      "album": "Harry's House",
+      "popularity": 87,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b2732e8ed79e177ff6011076f5f0",
+      "url": "https://open.spotify.com/track/4LRPiXqCikLlN15c3yImP7"
+    },
+    {
+      "id": "demo-4",
+      "name": "Flowers",
+      "artist": "Miley Cyrus",
+      "album": "Endless Summer Vacation",
+      "popularity": 85,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b273f429549123dbe8552764ba1d",
+      "url": "https://open.spotify.com/track/0yLdNVWF3Srea0uzk55zFn"
+    },
+    {
+      "id": "demo-5",
+      "name": "Anti-Hero",
+      "artist": "Taylor Swift",
+      "album": "Midnights",
+      "popularity": 88,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b273bb54dde68cd23e2a268ae0f5",
+      "url": "https://open.spotify.com/track/0V3wPSX9ygBnCm8psDIegu"
+    },
+    {
+      "id": "demo-6",
+      "name": "Unholy",
+      "artist": "Sam Smith, Kim Petras",
+      "album": "Gloria",
+      "popularity": 82,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b27314cdde6c455a07a30a82d175",
+      "url": "https://open.spotify.com/track/3nqQXoyQOWXiESFLlDF1hG"
+    },
+    {
+      "id": "demo-7",
+      "name": "Calm Down",
+      "artist": "Rema, Selena Gomez",
+      "album": "Rave & Roses Ultra",
+      "popularity": 84,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b273afae5e3d68e3d8a3dd96c97c",
+      "url": "https://open.spotify.com/track/0WtM2NBVQNNJLh6scP13H8"
+    },
+    {
+      "id": "demo-8",
+      "name": "Cruel Summer",
+      "artist": "Taylor Swift",
+      "album": "Lover",
+      "popularity": 90,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b273e787cffec20aa2a396a61647",
+      "url": "https://open.spotify.com/track/1BxfuPKGuaTgP7aM0Bbdwr"
+    },
+    {
+      "id": "demo-9",
+      "name": "Snooze",
+      "artist": "SZA",
+      "album": "SOS",
+      "popularity": 83,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b27370dbc9f47669d120ad874ec1",
+      "url": "https://open.spotify.com/track/4iZ4pt7kvcaH6Yo8UoZ4s2"
+    },
+    {
+      "id": "demo-10",
+      "name": "Vampire",
+      "artist": "Olivia Rodrigo",
+      "album": "GUTS",
+      "popularity": 81,
+      "imageUrl": "https://i.scdn.co/image/ab67616d0000b27371b542d49e7886a83bfdf6c5",
+      "url": "https://open.spotify.com/track/1kuGVB7EU95pJObxwvfwKS"
+    }
+  ]
+}

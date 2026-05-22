@@ -14,3 +14,7 @@ data.db-journal
 
 *.log
 .DS_Store
+
+# QA artifacts and local CSVs
+qa-*.png
+holdings.csv

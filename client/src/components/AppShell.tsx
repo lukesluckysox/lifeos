@@ -1,22 +1,57 @@
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Sun, Moon, Search, Music, Film, MapPin, LineChart, Home as HomeIcon, Menu, X } from "lucide-react";
+import { Sun, Moon, Search, Music, MapPin, LineChart, Home as HomeIcon, Menu, X, Tv, Calendar, BellOff, Bell, Bookmark, RefreshCw } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { useTheme } from "./ThemeProvider";
+import { useMode } from "./ModeProvider";
+import { useQuietMode, QUIET_DOMAIN_LABELS, type QuietDomain } from "./QuietModeProvider";
+import { useLocation as useCity } from "./LocationProvider";
 import { Input } from "@/components/ui/input";
+import { useQueryClient } from "@tanstack/react-query";
 
 const NAV = [
   { href: "/", label: "Home", icon: HomeIcon },
-  { href: "/music", label: "Music", icon: Music },
-  { href: "/film", label: "Film", icon: Film },
-  { href: "/places", label: "Places", icon: MapPin },
   { href: "/finance", label: "Finance", icon: LineChart },
+  { href: "/places", label: "Places", icon: MapPin },
+  { href: "/events", label: "Events", icon: Calendar },
+  { href: "/music", label: "Music", icon: Music },
+  { href: "/watch", label: "Watch", icon: Tv },
+  { href: "/saved", label: "Saved", icon: Bookmark },
 ];
+
+const QUIET_DOMAINS: QuietDomain[] = ["music", "finance", "film", "watch", "events", "places", "food", "concerts"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { theme, toggle } = useTheme();
+  const { mode, toggle: toggleMode } = useMode();
+  const { muted, toggle: toggleQuiet, reset: resetQuiet } = useQuietMode();
+  const { city, setCity } = useCity();
+  const queryClient = useQueryClient();
   const [location] = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const [quietOpen, setQuietOpen] = useState(false);
+  const [locOpen, setLocOpen] = useState(false);
+  const [cityDraft, setCityDraft] = useState(city);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      // Invalidate triggers a refetch for any active query on the current page.
+      // refetchType:"active" keeps the spinner tied to what's actually visible.
+      await queryClient.invalidateQueries({ refetchType: "active" });
+    } finally {
+      // Hold the spin briefly so it's perceptible even on instant cache hits
+      setTimeout(() => setRefreshing(false), 350);
+    }
+  };
+
+  const handleModeToggle = () => {
+    toggleMode();
+    // Invalidate all queries so they refetch with the new mode
+    queryClient.invalidateQueries();
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -101,6 +136,151 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
               <div className="ml-auto flex items-center gap-3">
                 <span className="hidden md:inline eyebrow">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</span>
+                {/* Shared location pill */}
+                <div className="relative">
+                  <button
+                    data-testid="button-location"
+                    onClick={() => { setCityDraft(city); setLocOpen(o => !o); }}
+                    aria-label="Change city"
+                    title={`Location \u2014 used across Food, Concerts, and Places. Currently: ${city}`}
+                    className="h-8 inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 hover:bg-accent px-3 transition-colors"
+                  >
+                    <MapPin size={12} className="text-teal" />
+                    <span className="font-mono text-[11px] uppercase tracking-wider">{city}</span>
+                  </button>
+                  {locOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setLocOpen(false)} />
+                      <div className="absolute right-0 mt-2 w-72 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg z-40 p-3" data-testid="menu-location">
+                        <div className="eyebrow mb-2">Set city</div>
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const next = cityDraft.trim();
+                            if (next) {
+                              setCity(next);
+                              setLocOpen(false);
+                              queryClient.invalidateQueries();
+                            }
+                          }}
+                          className="flex gap-2"
+                        >
+                          <Input
+                            data-testid="input-location-city"
+                            value={cityDraft}
+                            onChange={(e) => setCityDraft(e.target.value)}
+                            placeholder="City"
+                            autoFocus
+                            className="h-8 text-sm"
+                          />
+                          <button
+                            type="submit"
+                            data-testid="button-location-save"
+                            className="h-8 px-3 rounded-md border border-teal/40 bg-teal/15 text-teal text-xs font-mono uppercase tracking-wider hover:bg-teal/25"
+                          >
+                            Set
+                          </button>
+                        </form>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {["Honolulu", "Los Angeles", "New York", "San Francisco", "Tokyo"].map((c) => (
+                            <button
+                              key={c}
+                              data-testid={`button-location-quick-${c.toLowerCase().replace(/\s+/g, "-")}`}
+                              onClick={() => {
+                                setCity(c);
+                                setLocOpen(false);
+                                queryClient.invalidateQueries();
+                              }}
+                              className={`text-[11px] rounded-full border px-2 py-1 transition ${city === c ? "border-teal bg-teal/10 text-teal" : "border-border hover:bg-accent"}`}
+                            >
+                              {c}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="mt-3 pt-3 border-t border-border/40 text-[10px] text-muted-foreground italic">
+                          Shared across Food, Concerts, and Places.
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {/* Live / Demo pill toggle */}
+                <button
+                  data-testid="button-mode-toggle"
+                  onClick={handleModeToggle}
+                  aria-label={`Switch to ${mode === "live" ? "demo" : "live"} mode`}
+                  className="group h-8 inline-flex items-center rounded-full border border-border bg-secondary/40 hover:bg-accent transition-colors p-0.5 font-mono text-[10px] uppercase tracking-wider"
+                  title={mode === "live" ? "Showing your real data. Click to switch to sample data." : "Showing sample data \u2014 safe to share. Click to switch back to your data."}
+                >
+                  <span className={`px-2.5 py-1 rounded-full transition-colors ${mode === "live" ? "bg-teal text-background" : "text-muted-foreground"}`}>
+                    <span className="flex items-center gap-1.5">
+                      <span className={`h-1.5 w-1.5 rounded-full ${mode === "live" ? "bg-background animate-pulse" : "bg-muted-foreground"}`} />
+                      Live
+                    </span>
+                  </span>
+                  <span className={`px-2.5 py-1 rounded-full transition-colors ${mode === "demo" ? "bg-gold text-background" : "text-muted-foreground"}`}>
+                    Demo
+                  </span>
+                </button>
+                {/* Quiet mode trigger */}
+                <div className="relative">
+                  <button
+                    data-testid="button-quiet-mode"
+                    onClick={() => setQuietOpen(o => !o)}
+                    aria-label="Quiet mode"
+                    title={muted.size > 0 ? `${muted.size} muted on home` : "Quiet mode \u2014 mute domains on home"}
+                    className={`h-8 w-8 grid place-items-center rounded-md border transition-colors ${muted.size > 0 ? "border-gold text-gold bg-gold/10" : "border-border hover:bg-accent"}`}
+                  >
+                    {muted.size > 0 ? <BellOff size={14} /> : <Bell size={14} />}
+                  </button>
+                  {quietOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setQuietOpen(false)} />
+                      <div className="absolute right-0 mt-2 w-60 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg z-40 p-3" data-testid="menu-quiet-mode">
+                        <div className="eyebrow mb-2 flex items-center justify-between">
+                          <span>Quiet on home</span>
+                          {muted.size > 0 && (
+                            <button
+                              data-testid="button-quiet-reset"
+                              onClick={() => { resetQuiet(); }}
+                              className="font-mono text-[10px] uppercase tracking-wider text-teal hover:underline"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {QUIET_DOMAINS.map(d => {
+                            const m = muted.has(d);
+                            return (
+                              <button
+                                key={d}
+                                data-testid={`button-quiet-${d}`}
+                                onClick={() => toggleQuiet(d)}
+                                className={`text-xs rounded-md border px-2 py-1.5 transition ${m ? "border-gold bg-gold/10 text-gold" : "border-border hover:bg-accent"}`}
+                              >
+                                {QUIET_DOMAIN_LABELS[d]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-3 pt-3 border-t border-border/40 text-[10px] text-muted-foreground italic">
+                          Session-only. Cleared on refresh.
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <button
+                  data-testid="button-refresh"
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  aria-label="Refresh data on this page"
+                  title="Refresh data on this page"
+                  className="h-8 w-8 grid place-items-center rounded-md border border-border hover:bg-accent transition-colors disabled:opacity-60"
+                >
+                  <RefreshCw size={14} className={refreshing ? "animate-spin text-teal" : ""} />
+                </button>
                 <button
                   data-testid="button-theme-toggle"
                   onClick={toggle}

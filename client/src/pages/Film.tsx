@@ -1,5 +1,6 @@
-import { ArrowUpRight, Plus } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
+import { AddItem } from "@/components/AddItem";
 import { entities, relations } from "@/data/graph";
 import { filmRecs } from "@/data/recs";
 
@@ -41,9 +42,15 @@ export default function Film() {
                 <ArrowUpRight size={13} className="text-muted-foreground" />
               </div>
             ))}
-            <button className="w-full px-5 py-3 text-left flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-              <Plus size={13} /> Add
-            </button>
+            <div className="px-3 py-2">
+              <AddItem
+                kind="artist"
+                label="Add director or actor"
+                titlePlaceholder="Name"
+                subtitlePlaceholder="Role (director / actor)"
+                size="compact"
+              />
+            </div>
           </div>
         </div>
         <div>
@@ -55,9 +62,22 @@ export default function Film() {
                 <div className="font-mono text-[10px] text-muted-foreground tabular">{String(f.meta?.year ?? "")}</div>
               </div>
             ))}
-            <button className="w-full px-5 py-3 text-left flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-              <Plus size={13} /> Add
-            </button>
+            <div className="px-3 py-2 flex gap-2 flex-wrap">
+              <AddItem
+                kind="film"
+                label="Add film"
+                titlePlaceholder="Film title"
+                subtitlePlaceholder="Year (optional)"
+                size="compact"
+              />
+              <AddItem
+                kind="show"
+                label="Add show"
+                titlePlaceholder="Show title"
+                subtitlePlaceholder="Year (optional)"
+                size="compact"
+              />
+            </div>
           </div>
         </div>
       </section>

@@ -1,0 +1,131 @@
+{
+  "source": "spotify",
+  "seedGenres": [
+    "reggae",
+    "reggae-fusion",
+    "edm"
+  ],
+  "asOf": "2026-05-20",
+  "tracks": [
+    {
+      "id": "1aWA6FHwqGqH7b8XbKeiG0",
+      "name": "Looks Is Deceiving - 2000 Digital Remaster",
+      "artist": "The Gladiators",
+      "artistId": "3L5iYAziSDnuaHsSgbkcIP",
+      "album": "Trenchtown Mix Up",
+      "image": "https://i.scdn.co/image/ab67616d00001e0269e15ed73e1f42a7be18b8b1",
+      "popularity": 45,
+      "url": "https://open.spotify.com/track/1aWA6FHwqGqH7b8XbKeiG0",
+      "previewUrl": null,
+      "releaseDate": "1976"
+    },
+    {
+      "id": "2B9WvucNZKDJvZMYBbdDj1",
+      "name": "Shot by Love",
+      "artist": "Protoje, Toi",
+      "artistId": "7BGR8y1VZAWK2oR4zD9COr",
+      "album": "The 8 Year Affair",
+      "image": "https://i.scdn.co/image/ab67616d00001e0220d29aee3e43a68541b4424a",
+      "popularity": 41,
+      "url": "https://open.spotify.com/track/2B9WvucNZKDJvZMYBbdDj1",
+      "previewUrl": "https://p.scdn.co/mp3-preview/ba1f6a156ebbff5723ff82fafb503bab81362f3a?cid=2feb4729ba5145d7a7fd92f2af83cf0d",
+      "releaseDate": "2013-02-12"
+    },
+    {
+      "id": "3rHFo3c176QQnZ3Ucdbp21",
+      "name": "Killin' It",
+      "artist": "Krewella",
+      "artistId": "0Cd6nHYwecCNM1sVEXKlYr",
+      "album": "Play Hard EP",
+      "image": "https://i.scdn.co/image/ab67616d00001e02c237ac1410ffd6cfef5ac8e6",
+      "popularity": 38,
+      "url": "https://open.spotify.com/track/3rHFo3c176QQnZ3Ucdbp21",
+      "previewUrl": "https://p.scdn.co/mp3-preview/49724d82ffebe922b67dd52d3694c4ef12ec20a7?cid=2feb4729ba5145d7a7fd92f2af83cf0d",
+      "releaseDate": "2012-06-18"
+    },
+    {
+      "id": "4QcYPg7jfKSnhiroHd51hC",
+      "name": "African Teacher",
+      "artist": "Burning Spear",
+      "artistId": "6qaKS0nzGP4hfjl4aFZmEU",
+      "album": "Best Of The Fittest",
+      "image": "https://i.scdn.co/image/ab67616d00001e02a021be4ad398e1afa98c5e25",
+      "popularity": 35,
+      "url": "https://open.spotify.com/track/4QcYPg7jfKSnhiroHd51hC",
+      "previewUrl": "https://p.scdn.co/mp3-preview/29171b8f704adc9feb5f0aed641236b63639733d?cid=2feb4729ba5145d7a7fd92f2af83cf0d",
+      "releaseDate": "2001-08-20"
+    },
+    {
+      "id": "30sHxvIflGaWj7nnd3oSTo",
+      "name": "Monkey Island",
+      "artist": "Dubmood",
+      "artistId": "4D2G48IdJKhcdZ5c1dqp5Z",
+      "album": "Atari-Ska L'Atakk",
+      "image": "https://i.scdn.co/image/ab67616d00001e0275ba7b71f8bd08e978820608",
+      "popularity": 32,
+      "url": "https://open.spotify.com/track/30sHxvIflGaWj7nnd3oSTo",
+      "previewUrl": "https://p.scdn.co/mp3-preview/36019c40472c9fd4f455ea4593fd70dade9a5a85?cid=2feb4729ba5145d7a7fd92f2af83cf0d",
+      "releaseDate": "2007-08-10"
+    },
+    {
+      "id": "6j4PC0PT4A5TI9QitUTV2x",
+      "name": "Blue Dream",
+      "artist": "Big Gigantic",
+      "artistId": "7o7mC95EDbJKTcPAAs8C3r",
+      "album": "The Night Is Young",
+      "image": "https://i.scdn.co/image/ab67616d00001e02b3b4f02fb40ede384b7bb573",
+      "popularity": 26,
+      "url": "https://open.spotify.com/track/6j4PC0PT4A5TI9QitUTV2x",
+      "previewUrl": "https://p.scdn.co/mp3-preview/de7109f2465bfdc4db050da9d6d0f80a9c828ca8?cid=2feb4729ba5145d7a7fd92f2af83cf0d",
+      "releaseDate": "2014-02-11"
+    },
+    {
+      "id": "4g5dxNxjmQjMwwyKmxIseI",
+      "name": "Ina Dancehall",
+      "artist": "Pressure, Irie Ites",
+      "artistId": "009IKtLg2rg2QMbvNtWaoh",
+      "album": "Strange Things",
+      "image": "https://i.scdn.co/image/ab67616d00001e0257d4addb19375315c942edfc",
+      "popularity": 21,
+      "url": "https://open.spotify.com/track/4g5dxNxjmQjMwwyKmxIseI",
+      "previewUrl": "https://p.scdn.co/mp3-preview/c92fb92565f9c246ca743a21a5558a8c61ad690d?cid=2feb4729ba5145d7a7fd92f2af83cf0d",
+      "releaseDate": "2010-01-15"
+    },
+    {
+      "id": "2koorIBAoIG18yBvfhyLJu",
+      "name": "Creatures Of The Night",
+      "artist": "Bushman",
+      "artistId": "7LodktwOen0OBkVv3DyxMX",
+      "album": "Signs",
+      "image": "https://i.scdn.co/image/ab67616d00001e02bf1f7128e6a3968c1005f803",
+      "popularity": 0,
+      "url": "https://open.spotify.com/track/2koorIBAoIG18yBvfhyLJu",
+      "previewUrl": null,
+      "releaseDate": "2004-04-13"
+    },
+    {
+      "id": "0Yc1PcFl82lC2w3Bu4fXGP",
+      "name": "7Eleven",
+      "artist": "Dexta Daps",
+      "artistId": "28UDeKu2FPrU0T7dpUiSGY",
+      "album": "7Eleven - Single",
+      "image": "https://i.scdn.co/image/ab67616d00001e0277dfc4f0c4e6ea40a94bb5af",
+      "popularity": 0,
+      "url": "https://open.spotify.com/track/0Yc1PcFl82lC2w3Bu4fXGP",
+      "previewUrl": null,
+      "releaseDate": "2015-02-03"
+    },
+    {
+      "id": "5n5xU7TrGAj0iR0UtCUvRV",
+      "name": "They Gonna Talk",
+      "artist": "Beres Hammond",
+      "artistId": "2ruMkdO4e1tJWDHsYSEtxr",
+      "album": "Can't Stop A Man",
+      "image": "https://i.scdn.co/image/ab67616d00001e02ba76e688aa7e24965be1e4bc",
+      "popularity": 0,
+      "url": "https://open.spotify.com/track/5n5xU7TrGAj0iR0UtCUvRV",
+      "previewUrl": null,
+      "releaseDate": "2003-11-25"
+    }
+  ]
+}
