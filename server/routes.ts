@@ -572,9 +572,23 @@ export async function registerRoutes(
       };
     });
 
-    const effectivePlaid = plaidData || (mode === "demo" ? null : snapshot);
+    // Live mode: only show real Plaid data. No snapshot fallback — if the
+    // user has no brokerages connected, show $0, not the legacy demo
+    // snapshot. The snapshot is only used in demo mode AND for anonymous
+    // visitors who haven't signed in yet.
+    const effectivePlaid =
+      plaidData ??
+      (mode === "demo" ? snapshot : (!userId ? snapshot : null));
+
+    const source =
+      plaidData ? "plaid-live" :
+      mode === "demo" ? "demo" :
+      !userId ? "preview" :
+      manual.length ? "manual" :
+      "empty";
+
     res.json({
-      source: effectivePlaid ? (plaidData ? "plaid-live" : mode === "demo" ? "demo" : "plaid+manual") : (manual.length ? "manual" : "empty"),
+      source,
       mode,
       plaid: effectivePlaid,
       manual: manualEnriched,
