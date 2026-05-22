@@ -48,6 +48,33 @@ function getClient(): PlaidApi {
   return new PlaidApi(config);
 }
 
+/**
+ * Per-user in-flight Plaid link_token cache.
+ *
+ * Plaid OAuth requires that you re-initialize Plaid Link on the OAuth
+ * redirect-back with the EXACT SAME link_token that was used to start
+ * the flow. Since we can't use localStorage in the client (sandboxed
+ * iframe + CSP), we stash the token server-side keyed by userId. Cache
+ * entries expire after 30 minutes (Plaid link tokens are valid for 4h
+ * but the OAuth round-trip should be much shorter).
+ */
+const inflightLinkTokens = new Map<number, { token: string; createdAt: number }>();
+const LINK_TOKEN_TTL_MS = 30 * 60 * 1000;
+
+export function getInflightLinkToken(userId: number): string | null {
+  const entry = inflightLinkTokens.get(userId);
+  if (!entry) return null;
+  if (Date.now() - entry.createdAt > LINK_TOKEN_TTL_MS) {
+    inflightLinkTokens.delete(userId);
+    return null;
+  }
+  return entry.token;
+}
+
+export function clearInflightLinkToken(userId: number): void {
+  inflightLinkTokens.delete(userId);
+}
+
 /** Create a link token for the Plaid Link flow. */
 export async function createLinkToken(userId: number): Promise<string> {
   const client = getClient();
@@ -80,7 +107,10 @@ export async function createLinkToken(userId: number): Promise<string> {
 
   try {
     const response = await client.linkTokenCreate(params);
-    return response.data.link_token;
+    const token = response.data.link_token;
+    // Stash for OAuth resume — see inflightLinkTokens comment above.
+    inflightLinkTokens.set(userId, { token, createdAt: Date.now() });
+    return token;
   } catch (err: any) {
     // Plaid SDK wraps real errors inside err.response.data — surface them
     // so we don't lose the actual error_code/error_message in the logs.

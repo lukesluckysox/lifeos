@@ -70,6 +70,35 @@ function AppRouter() {
   );
 }
 
+/**
+ * Plaid OAuth bank redirect handler.
+ *
+ * Plaid redirects OAuth banks (Chase, BoA, etc.) back to the registered
+ * PLAID_REDIRECT_URI with `?oauth_state_id=xxx`. Our app uses hash
+ * routing, so this lands on `/` (Home page) and PlaidConnect — which
+ * lives on the Finance page — never mounts to resume the flow. Result:
+ * blue blank screen.
+ *
+ * On app startup, if we see `?oauth_state_id=` in the URL search, we
+ * rewrite the URL to `#/finance?oauth_state_id=xxx` so the user lands
+ * on the Finance page and PlaidConnect can pick up the OAuth state.
+ */
+function redirectPlaidOAuthIfPresent() {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  const oauthStateId = params.get("oauth_state_id");
+  if (!oauthStateId) return;
+  // Already on the finance hash route? Just clear the leading search so
+  // we don't double-redirect on every hashchange.
+  const target = `#/finance?oauth_state_id=${encodeURIComponent(oauthStateId)}`;
+  window.history.replaceState(null, "", window.location.pathname + target);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+// Run once at module load — before React mounts — so the router sees
+// the corrected hash on first render.
+redirectPlaidOAuthIfPresent();
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>

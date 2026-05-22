@@ -254,6 +254,16 @@ export async function registerRoutes(
     }
   });
 
+  // Return the in-flight link_token for this user so the client can
+  // re-initialize Plaid Link after an OAuth bank redirect. Without this,
+  // the OAuth resume flow can't continue (Plaid requires the original
+  // link_token + receivedRedirectUri). 404 if there's no in-flight token.
+  app.get("/api/plaid/link-token-current", requireAuth, async (req, res) => {
+    const token = Plaid.getInflightLinkToken(req.user!.id);
+    if (!token) return res.status(404).json({ error: "no in-flight link token" });
+    res.json({ linkToken: token });
+  });
+
   app.post("/api/plaid/exchange", requireAuth, async (req, res) => {
     const { publicToken, institutionName } = req.body || {};
     if (!publicToken) return res.status(400).json({ error: "publicToken required" });
@@ -264,6 +274,7 @@ export async function registerRoutes(
         accessToken,
         institutionName: institutionName || "Unknown",
       });
+      Plaid.clearInflightLinkToken(req.user!.id);
       res.json({ ok: true, item: { id: item.id, institutionName: item.institutionName } });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
