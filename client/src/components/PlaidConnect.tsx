@@ -29,6 +29,16 @@ function isPlaidOAuthReturn(): boolean {
 }
 
 function PlaidLinkButton({ onSuccess, disabled }: { onSuccess: (publicToken: string, institutionName: string) => void; disabled?: boolean }) {
+  return <PlaidLinkButtonInner onSuccess={onSuccess} disabled={disabled} />;
+}
+
+/**
+ * Inner component is gated on having a non-empty linkToken before
+ * mounting usePlaidLink — otherwise the Plaid SDK initializes with
+ * token="" + receivedRedirectUri set, which is exactly the state that
+ * shows a blank blue screen on OAuth bank return.
+ */
+function PlaidLinkButtonInner({ onSuccess, disabled }: { onSuccess: (publicToken: string, institutionName: string) => void; disabled?: boolean }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [autoOpened, setAutoOpened] = useState(false);
@@ -36,16 +46,78 @@ function PlaidLinkButton({ onSuccess, disabled }: { onSuccess: (publicToken: str
   // want this to flip back to false after we clean the URL.
   const [isOAuthReturn] = useState<boolean>(isPlaidOAuthReturn);
 
+  // Without a non-empty token there is nothing for Plaid Link to mount
+  // on. Render a lightweight placeholder while we either:
+  //   - fetch a fresh link_token (button click path), or
+  //   - resume an OAuth flow by fetching the stashed token.
+  // Once linkToken is set, we render <PlaidLinkMounted/> which calls
+  // usePlaidLink with valid inputs.
+  if (!linkToken) {
+    return (
+      <PlaidLinkBootstrap
+        isOAuthReturn={isOAuthReturn}
+        fetchError={fetchError}
+        autoOpened={autoOpened}
+        onFetchError={setFetchError}
+        onResetAutoOpened={() => setAutoOpened(false)}
+        onLinkToken={setLinkToken}
+        disabled={disabled}
+      />
+    );
+  }
+
+  return (
+    <PlaidLinkMounted
+      linkToken={linkToken}
+      isOAuthReturn={isOAuthReturn}
+      autoOpened={autoOpened}
+      setAutoOpened={setAutoOpened}
+      onSuccess={(pt, inst) => {
+        onSuccess(pt, inst);
+        setLinkToken(null);
+        setAutoOpened(false);
+      }}
+      onExit={() => {
+        setLinkToken(null);
+        setAutoOpened(false);
+      }}
+      onInitError={(msg) => {
+        setFetchError(msg);
+        setLinkToken(null);
+        setAutoOpened(false);
+      }}
+      disabled={disabled}
+    />
+  );
+}
+
+function PlaidLinkBootstrap({
+  isOAuthReturn,
+  fetchError,
+  autoOpened,
+  onFetchError,
+  onResetAutoOpened,
+  onLinkToken,
+  disabled,
+}: {
+  isOAuthReturn: boolean;
+  fetchError: string | null;
+  autoOpened: boolean;
+  onFetchError: (msg: string | null) => void;
+  onResetAutoOpened: () => void;
+  onLinkToken: (token: string) => void;
+  disabled?: boolean;
+}) {
   const fetchLinkToken = useCallback(async () => {
     try {
       const res = await apiRequest("POST", "/api/plaid/link-token");
       const data = await res.json();
-      if (data.error) { setFetchError(data.error); return; }
-      setLinkToken(data.linkToken);
+      if (data.error) { onFetchError(data.error); return; }
+      onLinkToken(data.linkToken);
     } catch (e: any) {
-      setFetchError(e.message);
+      onFetchError(e.message);
     }
-  }, []);
+  }, [onFetchError, onLinkToken]);
 
   // On OAuth return, fetch the ORIGINAL link_token that was used to start
   // the flow. Plaid requires the same token to resume — a fresh token
@@ -55,30 +127,98 @@ function PlaidLinkButton({ onSuccess, disabled }: { onSuccess: (publicToken: str
     try {
       const res = await apiRequest("GET", "/api/plaid/link-token-current");
       if (!res.ok) {
-        // No in-flight token — fall back to a fresh one. User will likely
-        // need to start the flow again, but at least the page isn't blank.
-        setFetchError(
-          "Plaid OAuth session expired. Please try connecting your account again.",
+        onFetchError(
+          "Plaid OAuth session expired. Please click 'Connect brokerage' to try again.",
         );
+        // Strip the oauth_state_id so a refresh doesn't loop on the
+        // resume path again.
+        if (typeof window !== "undefined") {
+          const cleanUrl = window.location.pathname + (window.location.hash || "");
+          window.history.replaceState(null, "", cleanUrl);
+        }
         return;
       }
       const data = await res.json();
-      setLinkToken(data.linkToken);
+      if (!data.linkToken) {
+        onFetchError("Plaid OAuth session expired. Please try connecting again.");
+        return;
+      }
+      onLinkToken(data.linkToken);
     } catch (e: any) {
-      setFetchError(e.message);
+      onFetchError(e.message);
     }
-  }, []);
+  }, [onFetchError, onLinkToken]);
+
+  // OAuth return: immediately fetch the stashed link_token on mount.
+  useEffect(() => {
+    if (isOAuthReturn && !fetchError) {
+      resumeOAuthLink();
+    }
+  }, [isOAuthReturn, fetchError, resumeOAuthLink]);
+
+  if (fetchError) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-plaid-error">
+        <AlertCircle size={12} className="text-amber-400" />
+        <span>Plaid unavailable: {fetchError}</span>
+      </div>
+    );
+  }
+
+  if (isOAuthReturn) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-plaid-resuming">
+        <span className="inline-block h-2 w-2 rounded-full bg-teal animate-pulse" />
+        <span>Resuming brokerage connection…</span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      data-testid="button-plaid-connect"
+      onClick={() => {
+        onResetAutoOpened();
+        fetchLinkToken();
+      }}
+      disabled={disabled}
+      className="inline-flex items-center gap-2 rounded-md bg-teal/15 border border-teal/30 text-teal px-3 py-1.5 text-xs font-medium hover:bg-teal/25 disabled:opacity-40 transition-colors"
+    >
+      <Plus size={12} />
+      Connect brokerage
+    </button>
+  );
+}
+
+function PlaidLinkMounted({
+  linkToken,
+  isOAuthReturn,
+  autoOpened,
+  setAutoOpened,
+  onSuccess,
+  onExit,
+  onInitError,
+  disabled,
+}: {
+  linkToken: string;
+  isOAuthReturn: boolean;
+  autoOpened: boolean;
+  setAutoOpened: (v: boolean) => void;
+  onSuccess: (publicToken: string, institutionName: string) => void;
+  onExit: () => void;
+  onInitError: (msg: string) => void;
+  disabled?: boolean;
+}) {
 
   const { open, ready, error: linkError } = usePlaidLink({
-    token: linkToken || "",
+    token: linkToken,
     // Critical for OAuth resume — pass the full current URL so Plaid Link
     // can pick up oauth_state_id and complete the flow.
     receivedRedirectUri: isOAuthReturn ? window.location.href : undefined,
     onSuccess: (publicToken, metadata) => {
       const institutionName = metadata.institution?.name || "Unknown";
       onSuccess(publicToken, institutionName);
-      setLinkToken(null);
-      setAutoOpened(false);
       // Clean up the oauth_state_id from URL so the next mount doesn't
       // try to resume again.
       if (isOAuthReturn && typeof window !== "undefined") {
@@ -88,8 +228,7 @@ function PlaidLinkButton({ onSuccess, disabled }: { onSuccess: (publicToken: str
     },
     onExit: (err) => {
       if (err) console.error("[plaid-link-exit]", err);
-      setLinkToken(null);
-      setAutoOpened(false);
+      onExit();
       if (isOAuthReturn && typeof window !== "undefined") {
         const cleanUrl = window.location.pathname + window.location.hash;
         window.history.replaceState(null, "", cleanUrl);
@@ -102,76 +241,26 @@ function PlaidLinkButton({ onSuccess, disabled }: { onSuccess: (publicToken: str
     },
   });
 
-  // OAuth return: immediately fetch the stashed link_token on mount.
-  useEffect(() => {
-    if (isOAuthReturn && !linkToken && !fetchError) {
-      resumeOAuthLink();
-    }
-  }, [isOAuthReturn, linkToken, fetchError, resumeOAuthLink]);
-
   // Auto-open when token is ready — but only once per token.
   useEffect(() => {
-    if (linkToken && ready && !autoOpened) {
+    if (ready && !autoOpened) {
       setAutoOpened(true);
       open();
     }
-  }, [linkToken, ready, autoOpened, open]);
+  }, [ready, autoOpened, open]);
 
   // Surface Plaid initialization errors instead of going blank
   useEffect(() => {
     if (linkError) {
-      setFetchError(linkError.message || "Plaid Link failed to initialize");
-      setLinkToken(null);
-      setAutoOpened(false);
+      onInitError(linkError.message || "Plaid Link failed to initialize");
     }
-  }, [linkError]);
-
-  const handleClick = async () => {
-    if (!linkToken) {
-      setAutoOpened(false);
-      await fetchLinkToken();
-    }
-  };
-
-  if (fetchError) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-plaid-error">
-        <AlertCircle size={12} className="text-amber-400" />
-        <span>Plaid unavailable: {fetchError}</span>
-      </div>
-    );
-  }
-
-  // OAuth return loading state — give visible feedback while the resume
-  // round-trip happens. Without this the user just sees nothing.
-  if (isOAuthReturn && !linkToken) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-plaid-resuming">
-        <span className="inline-block h-2 w-2 rounded-full bg-teal animate-pulse" />
-        <span>Resuming brokerage connection…</span>
-      </div>
-    );
-  }
-  if (isOAuthReturn && linkToken && !ready) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-plaid-finalizing">
-        <span className="inline-block h-2 w-2 rounded-full bg-teal animate-pulse" />
-        <span>Finishing connection…</span>
-      </div>
-    );
-  }
+  }, [linkError, onInitError]);
 
   return (
-    <button
-      type="button"
-      data-testid="button-plaid-connect"
-      onClick={handleClick}
-      disabled={disabled || !!(linkToken && !ready)}
-      className="inline-flex items-center gap-2 rounded-md bg-teal/15 border border-teal/30 text-teal px-3 py-1.5 text-xs font-medium hover:bg-teal/25 disabled:opacity-40 transition-colors"
-    >
-      <Plus size={12} />
-      Connect brokerage
-    </button>
+    <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-plaid-finalizing">
+      <span className="inline-block h-2 w-2 rounded-full bg-teal animate-pulse" />
+      <span>{isOAuthReturn ? "Finishing connection…" : "Opening Plaid…"}</span>
+    </div>
   );
 }
 

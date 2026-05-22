@@ -54,25 +54,42 @@ function getClient(): PlaidApi {
  * Plaid OAuth requires that you re-initialize Plaid Link on the OAuth
  * redirect-back with the EXACT SAME link_token that was used to start
  * the flow. Since we can't use localStorage in the client (sandboxed
- * iframe + CSP), we stash the token server-side keyed by userId. Cache
- * entries expire after 30 minutes (Plaid link tokens are valid for 4h
+ * iframe + CSP), we stash the token server-side keyed by userId.
+ *
+ * Persisted to the `secrets` table so it survives Railway redeploys /
+ * container restarts — an in-memory Map silently lost the token whenever
+ * the dyno cycled, which made Plaid Link return to a blank blue screen.
+ *
+ * Entries expire after 30 minutes (Plaid link tokens are valid for 4h
  * but the OAuth round-trip should be much shorter).
  */
-const inflightLinkTokens = new Map<number, { token: string; createdAt: number }>();
+import { storage } from "./storage";
+const LINK_TOKEN_SECRET_KEY = "plaid:inflight_link_token";
+const LINK_TOKEN_TS_KEY = "plaid:inflight_link_token_ts";
 const LINK_TOKEN_TTL_MS = 30 * 60 * 1000;
 
-export function getInflightLinkToken(userId: number): string | null {
-  const entry = inflightLinkTokens.get(userId);
-  if (!entry) return null;
-  if (Date.now() - entry.createdAt > LINK_TOKEN_TTL_MS) {
-    inflightLinkTokens.delete(userId);
+export async function getInflightLinkToken(userId: number): Promise<string | null> {
+  const token = await storage.getSecret(userId, LINK_TOKEN_SECRET_KEY);
+  if (!token) return null;
+  const tsStr = await storage.getSecret(userId, LINK_TOKEN_TS_KEY);
+  const ts = tsStr ? parseInt(tsStr, 10) : 0;
+  if (!ts || Date.now() - ts > LINK_TOKEN_TTL_MS) {
+    await clearInflightLinkToken(userId);
     return null;
   }
-  return entry.token;
+  return token;
 }
 
-export function clearInflightLinkToken(userId: number): void {
-  inflightLinkTokens.delete(userId);
+export async function setInflightLinkToken(userId: number, token: string): Promise<void> {
+  await storage.setSecret(userId, LINK_TOKEN_SECRET_KEY, token);
+  await storage.setSecret(userId, LINK_TOKEN_TS_KEY, Date.now().toString());
+}
+
+export async function clearInflightLinkToken(userId: number): Promise<void> {
+  // setSecret is upsert; we don't have a deleteSecret helper, so just
+  // blank the values. getInflightLinkToken treats empty as missing.
+  await storage.setSecret(userId, LINK_TOKEN_SECRET_KEY, "");
+  await storage.setSecret(userId, LINK_TOKEN_TS_KEY, "");
 }
 
 /** Create a link token for the Plaid Link flow. */
@@ -108,8 +125,8 @@ export async function createLinkToken(userId: number): Promise<string> {
   try {
     const response = await client.linkTokenCreate(params);
     const token = response.data.link_token;
-    // Stash for OAuth resume — see inflightLinkTokens comment above.
-    inflightLinkTokens.set(userId, { token, createdAt: Date.now() });
+    // Stash for OAuth resume — see comment above.
+    await setInflightLinkToken(userId, token);
     return token;
   } catch (err: any) {
     // Plaid SDK wraps real errors inside err.response.data — surface them

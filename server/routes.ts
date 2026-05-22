@@ -260,7 +260,7 @@ export async function registerRoutes(
   // the OAuth resume flow can't continue (Plaid requires the original
   // link_token + receivedRedirectUri). 404 if there's no in-flight token.
   app.get("/api/plaid/link-token-current", requireAuth, async (req, res) => {
-    const token = Plaid.getInflightLinkToken(req.user!.id);
+    const token = await Plaid.getInflightLinkToken(req.user!.id);
     if (!token) return res.status(404).json({ error: "no in-flight link token" });
     res.json({ linkToken: token });
   });
@@ -275,7 +275,7 @@ export async function registerRoutes(
         accessToken,
         institutionName: institutionName || "Unknown",
       });
-      Plaid.clearInflightLinkToken(req.user!.id);
+      await Plaid.clearInflightLinkToken(req.user!.id);
       res.json({ ok: true, item: { id: item.id, institutionName: item.institutionName } });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
