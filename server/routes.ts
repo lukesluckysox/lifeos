@@ -202,8 +202,21 @@ export async function registerRoutes(
       const tok = await Spotify.exchangeCodeForToken(code);
       const profile = await Spotify.getMe(tok.access_token);
 
-      // Find or create user
+      // 1) Match by Spotify ID first.
       let user = await storage.getUserBySpotifyId(profile.id);
+
+      // 2) If not found and we have an email, try linking to an existing
+      //    user with the same email (e.g. a Google-linked account). This
+      //    keeps the same DB user across Google + Spotify sign-ins so
+      //    Plaid items, holdings, and watchlists all stay attached.
+      if (!user && profile.email) {
+        const existing = await storage.getUserByEmail(profile.email);
+        if (existing) {
+          user = await storage.updateUser(existing.id, { spotifyId: profile.id });
+        }
+      }
+
+      // 3) Otherwise create a brand new user.
       if (!user) {
         user = await storage.createUser({
           spotifyId: profile.id,

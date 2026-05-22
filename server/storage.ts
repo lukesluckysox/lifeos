@@ -207,6 +207,91 @@ try {
   sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL");
 } catch {}
 
+// One-time cleanup: merge duplicate users that share the same email but ended
+// up as separate rows because the Spotify callback did not cross-link by
+// email. Re-points all owned data (plaid_items, holdings, watchlist,
+// subscriptions, food_spots, rec_feedback, user_items, secrets, ratings,
+// sessions, spotify refresh tokens, manual cost basis) at the oldest user
+// id and then deletes the duplicates.
+function mergeDuplicateUsersByEmail() {
+  try {
+    const dupes = sqlite
+      .prepare(
+        `SELECT email, MIN(id) as keepId, GROUP_CONCAT(id) as allIds, COUNT(*) as n
+         FROM users
+         WHERE email IS NOT NULL AND email != ''
+         GROUP BY email
+         HAVING n > 1`
+      )
+      .all() as Array<{ email: string; keepId: number; allIds: string; n: number }>;
+
+    if (dupes.length === 0) return;
+
+    const ownedTables = [
+      "plaid_items",
+      "holdings",
+      "watchlist",
+      "subscriptions",
+      "food_spots",
+      "rec_feedback",
+      "user_items",
+      "secrets",
+      "ratings",
+      "sessions",
+    ];
+
+    const tx = sqlite.transaction(() => {
+      for (const d of dupes) {
+        const ids = d.allIds.split(",").map(Number).filter(id => id !== d.keepId);
+        const keep = d.keepId;
+
+        // Re-point owned rows to the surviving user.
+        for (const t of ownedTables) {
+          try {
+            sqlite.prepare(`UPDATE ${t} SET user_id = ? WHERE user_id IN (${ids.join(",")})`).run(keep);
+          } catch {
+            // Table may not exist on older deploys — ignore.
+          }
+        }
+
+        // Merge the auth identity columns onto the survivor so future
+        // sign-ins (Google or Spotify) resolve to the same row.
+        const others = sqlite
+          .prepare(`SELECT spotify_id, google_id, display_name, avatar_url FROM users WHERE id IN (${ids.join(",")})`)
+          .all() as any[];
+        const merged: Record<string, any> = {};
+        for (const o of others) {
+          if (o.spotify_id && !merged.spotify_id) merged.spotify_id = o.spotify_id;
+          if (o.google_id && !merged.google_id) merged.google_id = o.google_id;
+          if (o.display_name && !merged.display_name) merged.display_name = o.display_name;
+          if (o.avatar_url && !merged.avatar_url) merged.avatar_url = o.avatar_url;
+        }
+        // Only overwrite survivor fields that are currently NULL.
+        const survivor = sqlite.prepare(`SELECT * FROM users WHERE id = ?`).get(keep) as any;
+        const patch: Record<string, any> = {};
+        if (!survivor.spotify_id && merged.spotify_id) patch.spotify_id = merged.spotify_id;
+        if (!survivor.google_id && merged.google_id) patch.google_id = merged.google_id;
+        if (!survivor.display_name && merged.display_name) patch.display_name = merged.display_name;
+        if (!survivor.avatar_url && merged.avatar_url) patch.avatar_url = merged.avatar_url;
+        const keys = Object.keys(patch);
+        if (keys.length) {
+          const setClause = keys.map(k => `${k} = ?`).join(", ");
+          sqlite.prepare(`UPDATE users SET ${setClause} WHERE id = ?`).run(...keys.map(k => patch[k]), keep);
+        }
+
+        // Finally delete the duplicate user rows.
+        sqlite.prepare(`DELETE FROM users WHERE id IN (${ids.join(",")})`).run();
+
+        console.log(`[merge-users] merged ${ids.length} duplicate(s) of ${d.email} into user ${keep}`);
+      }
+    });
+    tx();
+  } catch (e: any) {
+    console.error("[merge-users] failed:", e.message);
+  }
+}
+mergeDuplicateUsersByEmail();
+
 export const db = drizzle(sqlite);
 
 export interface IStorage {
