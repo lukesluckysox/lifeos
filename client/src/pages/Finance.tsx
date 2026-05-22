@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, Sparkles, ArrowUpRight, Building2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, ArrowUpRight, Building2 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { PlaidConnect } from "@/components/PlaidConnect";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -36,20 +36,15 @@ interface PortfolioResp {
 interface WatchItem { id: number; kind: "stock" | "crypto"; symbol: string; name: string | null; note: string | null; createdAt: number; price: number | null; dayChangePct: number | null }
 interface RecItem { symbol: string; name: string; reason: string; basedOn: string; kind: "stock" | "crypto"; price: number | null; dayChangePct: number | null }
 interface RecsResp { recommendations: RecItem[]; basedOnTickers: string[] }
-interface BullBearItem { symbol: string; bull: string; bear: string }
-interface BullBearResp { items: BullBearItem[]; asOf: string; seed: number }
 interface MoverItem { symbol: string; name: string; price: number; dayChangePct: number; dayChangeAbs: number; marketCap?: number; volume?: number }
 interface MoversResp { gainers: MoverItem[]; losers: MoverItem[]; asOf: string }
 interface IndexQuoteResp { symbol: string; kind: string; name: string; currentPrice: number; oneYearReturnPct: number; ytdReturnPct: number; series: { t: number; p: number }[] }
 interface PlaidItemRow { id: number; itemId: string; institutionName: string; createdAt: number }
 
-/* ---------- Component ---------- */
+/* ---------- Shared portfolio hook ---------- */
 
-function FinanceMain() {
+function usePortfolio() {
   const { mode, withMode } = useMode();
-  const { toast } = useToast();
-
-  /* Portfolio (Plaid + manual or demo snapshot) */
   const { data: portfolio } = useQuery<PortfolioResp>({
     queryKey: ["/api/portfolio", mode],
     queryFn: async () => (await apiRequest("GET", withMode("/api/portfolio"))).json(),
@@ -62,7 +57,6 @@ function FinanceMain() {
     enabled: mode !== "demo",
   });
 
-  /* Combined holdings */
   const plaidHoldings = portfolio?.plaid?.holdings ?? [];
   const manualHoldings = portfolio?.manual ?? [];
   const plaidValue = portfolio?.plaid?.totalValue ?? 0;
@@ -74,13 +68,11 @@ function FinanceMain() {
   const dayChange = plaidDayChange + manualDayChange;
   const dayChangePct = netWorth > 0 ? (dayChange / (netWorth - dayChange)) * 100 : 0;
 
-  // Blended return %: weighted avg of plaid totalGainPct and manual gainPct
   const plaidCost = portfolio?.plaid ? (plaidValue - (portfolio.plaid.totalGain || 0)) : 0;
   const manualCost = manualHoldings.reduce((s, h) => s + h.quantity * h.costBasis, 0);
   const totalCost = plaidCost + manualCost;
   const blendedGainPct = totalCost > 0 ? ((netWorth - totalCost) / totalCost) * 100 : 0;
 
-  /* Allocation rows (top 12 by value) */
   const allocRows = [
     ...plaidHoldings.map(h => ({ symbol: h.ticker, name: h.name, value: h.value, dayChangePct: h.dayChangePct, source: "plaid" as const })),
     ...manualHoldings.map(h => ({ symbol: h.symbol, name: h.name, value: h.value, dayChangePct: h.dayChangePct, source: "manual" as const })),
@@ -89,7 +81,33 @@ function FinanceMain() {
     .slice(0, 12)
     .map(r => ({ ...r, weight: netWorth > 0 ? (r.value / netWorth) * 100 : 0 }));
 
-  /* Read narrative */
+  const sentimentHoldings = [
+    ...plaidHoldings.map(h => ({ symbol: h.ticker })),
+    ...manualHoldings.map(h => ({ symbol: h.symbol })),
+  ];
+  const valuedHoldings = [
+    ...plaidHoldings.map(h => ({ symbol: h.ticker, value: h.value, name: h.name })),
+    ...manualHoldings.map(h => ({ symbol: h.symbol, value: h.value, name: h.name })),
+  ];
+
+  return {
+    portfolio, plaidItems, plaidHoldings, manualHoldings, plaidValue, manualValue, netWorth,
+    dayChange, dayChangePct, totalCost, blendedGainPct,
+    allocRows, sentimentHoldings, valuedHoldings, mode,
+  };
+}
+
+/* ---------- Portfolio tab ---------- */
+
+function FinancePortfolio() {
+  const { mode } = useMode();
+  const { toast } = useToast();
+
+  const {
+    portfolio, plaidItems, manualHoldings, plaidValue, manualValue, netWorth,
+    dayChange, dayChangePct, totalCost, blendedGainPct, allocRows,
+  } = usePortfolio();
+
   const topConcentration = allocRows[0];
   const biggestMover = [...allocRows].sort((a, b) => Math.abs(b.dayChangePct) - Math.abs(a.dayChangePct))[0];
 
@@ -126,8 +144,9 @@ function FinanceMain() {
   });
 
   /* Watchlist */
+  const { mode: m, withMode } = useMode();
   const { data: watchlist = [] } = useQuery<WatchItem[]>({
-    queryKey: ["/api/watchlist", mode],
+    queryKey: ["/api/watchlist", m],
     queryFn: async () => (await apiRequest("GET", withMode("/api/watchlist"))).json(),
   });
   const [wForm, setWForm] = useState({ kind: "stock" as "stock" | "crypto", symbol: "", note: "" });
@@ -148,34 +167,9 @@ function FinanceMain() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/watchlist"] }),
   });
 
-  /* Recommendations */
-  const { data: recsData } = useQuery<RecsResp>({
-    queryKey: ["/api/recommendations", mode],
-    queryFn: async () => (await apiRequest("GET", withMode("/api/recommendations"))).json(),
-  });
-  const recs = recsData?.recommendations ?? [];
-
-  /* Market movers (replaces Bull/Bear) */
-  const { data: movers, isFetching: moversLoading, refetch: refetchMovers } = useQuery<MoversResp>({
-    queryKey: ["/api/market-movers"],
-    queryFn: async () => (await apiRequest("GET", "/api/market-movers")).json(),
-  });
-
   const indexOptions = ["SPY", "QQQ", "VTI", "VOO", "BTC", "ETH", "SOL"];
 
-  const sentimentHoldings = [
-    ...plaidHoldings.map(h => ({ symbol: h.ticker })),
-    ...manualHoldings.map(h => ({ symbol: h.symbol })),
-  ];
-
-  // Holdings with dollar value — used by OptimalAllocation for weighting
-  const valuedHoldings = [
-    ...plaidHoldings.map(h => ({ symbol: h.ticker, value: h.value, name: h.name })),
-    ...manualHoldings.map(h => ({ symbol: h.symbol, value: h.value, name: h.name })),
-  ];
-
   return (
-    <LookbackProvider>
     <div className="space-y-16 animate-fade-in">
       {/* ============ Connected brokerages strip (real Plaid items) ============ */}
       {mode !== "demo" && plaidItems && plaidItems.length > 0 && (
@@ -230,33 +224,10 @@ function FinanceMain() {
             <Metric label="Lifetime" value={totalCost ? `${blendedGainPct >= 0 ? "+" : ""}${blendedGainPct.toFixed(1)}%` : "—"} sub="blended" />
           </div>
         </div>
-
-        {/* Global lookback — every metric below recalculates against this window */}
-        <div className="mt-6 flex items-center gap-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Lookback</div>
-          <LookbackPills />
-        </div>
       </section>
-
-      <div className="hairline" />
-
-      {/* ============ Sentiment engine ============ */}
-      <SentimentEngine holdings={sentimentHoldings} />
-
-      {/* ============ Optimal allocation + what-if ============ */}
-      <OptimalAllocation holdings={valuedHoldings} />
-
-      {/* ============ ETF tiles ============ */}
-      <ETFTiles />
-
-      {/* ============ Category leaders ============ */}
-      <CategoryLeaders />
 
       {/* ============ Plaid brokerage connect ============ */}
       {mode !== "demo" && <PlaidConnect />}
-
-      {/* ============ Advisory insights ============ */}
-      <FinanceInsights />
 
       <div className="hairline" />
 
@@ -373,6 +344,13 @@ function FinanceMain() {
               )}
               {portfolio?.source === "demo" && " This is sample data for sharing."}
             </p>
+            <div className="mt-5 pt-5 border-t border-border/40">
+              <Link href="/finance?tab=advisor" data-testid="link-to-advisor">
+                <span className="inline-flex items-center gap-1.5 text-xs font-mono text-teal hover:underline underline-offset-2 cursor-pointer">
+                  Open Advisor for sentiment, optimal mix & sector leaders <ArrowUpRight size={11} />
+                </span>
+              </Link>
+            </div>
           </div>
         </section>
       )}
@@ -537,99 +515,136 @@ function FinanceMain() {
           )}
         </div>
       </section>
-
-      {/* ============ Recommendations ============ */}
-      <section>
-        <SectionHeader eyebrow="Adjacent" title="Similar to what you hold" />
-        {recs.length === 0 ? (
-          <EmptyCard label="No recommendations yet" sub="Add a few holdings first — we'll suggest sector and theme peers." />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {recs.map(r => (
-              <div
-                key={r.symbol}
-                data-testid={`card-rec-${r.symbol}`}
-                className="rounded-lg border border-border bg-card p-4 hover:border-teal/40 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div>
-                    <div className="font-mono text-sm font-medium">{r.symbol}</div>
-                    <div className="text-xs text-muted-foreground truncate max-w-[180px]">{r.name}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono tabular text-sm">
-                      {r.price != null ? `$${r.price.toLocaleString(undefined,{maximumFractionDigits:2})}` : "—"}
-                    </div>
-                    <div className={`font-mono tabular text-[11px] ${(r.dayChangePct ?? 0) >= 0 ? "text-teal" : "text-rose"}`}>
-                      {r.dayChangePct != null ? `${r.dayChangePct >= 0 ? "+" : ""}${r.dayChangePct.toFixed(2)}%` : ""}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground leading-relaxed">{r.reason}</div>
-                <div className="mt-3 pt-3 border-t border-border/40 flex items-center justify-between gap-2">
-                  <RecFeedback
-                    kind="finance"
-                    externalId={r.symbol}
-                    why={`Adjacent to ${r.basedOn}`}
-                    reason={r.reason}
-                    title={`${r.symbol} \u2014 ${r.name}`}
-                    meta={{ symbol: r.symbol, name: r.name, kind: r.kind, basedOn: r.basedOn }}
-                    compact
-                    className="flex-1 min-w-0"
-                  />
-                  <button
-                    onClick={() => {
-                      setWForm({ kind: r.kind, symbol: r.symbol, note: `${r.reason} (based on ${r.basedOn})` });
-                      window.scrollTo({ top: document.body.scrollHeight * 0.55, behavior: "smooth" });
-                    }}
-                    data-testid={`button-watch-rec-${r.symbol}`}
-                    className="text-[11px] font-mono text-teal hover:underline underline-offset-2 inline-flex items-center gap-1 shrink-0"
-                  >
-                    <Eye size={11} /> watch
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* ============ Market movers (market-wide) ============ */}
-      <section data-testid="section-market-movers">
-        <div className="flex items-end justify-between mb-5 gap-4">
-          <div>
-            <div className="eyebrow mb-1">Market today</div>
-            <h2 className="font-display text-xl leading-tight">Biggest gainers & losers</h2>
-          </div>
-          <button
-            onClick={() => refetchMovers()}
-            disabled={moversLoading}
-            data-testid="button-refresh-movers"
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={12} className={moversLoading ? "animate-spin" : ""} /> refresh
-          </button>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <MoversColumn title="Top 5 Gainers" items={movers?.gainers ?? []} positive />
-          <MoversColumn title="Top 5 Losers" items={movers?.losers ?? []} positive={false} />
-        </div>
-      </section>
-
-      {/* ============ Subscriptions link ============ */}
-      <section>
-        <Link href="/subscriptions" data-testid="link-subscriptions">
-          <div className="flex items-center justify-between rounded-lg border border-border bg-card hover:border-teal/40 px-5 py-4 cursor-pointer transition-colors">
-            <div>
-              <div className="eyebrow">Audit</div>
-              <div className="font-display text-lg">Recurring subscriptions</div>
-              <div className="text-xs text-muted-foreground mt-1">Auto-detected from your transactions + manual entries.</div>
-            </div>
-            <ArrowUpRight size={18} className="text-muted-foreground" />
-          </div>
-        </Link>
-      </section>
     </div>
+  );
+}
+
+/* ---------- Advisor tab ---------- */
+
+function FinanceAdvisor() {
+  const { mode, withMode } = useMode();
+  const { sentimentHoldings, valuedHoldings } = usePortfolio();
+
+  /* Recommendations */
+  const { data: recsData } = useQuery<RecsResp>({
+    queryKey: ["/api/recommendations", mode],
+    queryFn: async () => (await apiRequest("GET", withMode("/api/recommendations"))).json(),
+  });
+  const recs = recsData?.recommendations ?? [];
+
+  /* Market movers */
+  const { data: movers, isFetching: moversLoading, refetch: refetchMovers } = useQuery<MoversResp>({
+    queryKey: ["/api/market-movers"],
+    queryFn: async () => (await apiRequest("GET", "/api/market-movers")).json(),
+  });
+
+  return (
+    <LookbackProvider>
+      <div className="space-y-16 animate-fade-in">
+        {/* ============ Lookback header ============ */}
+        <section>
+          <div className="eyebrow mb-3">
+            Advisor {mode === "demo" && <span className="ml-2 text-gold">· demo</span>}
+          </div>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h2 className="font-display text-xl leading-tight">A second pair of eyes on your book</h2>
+              <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+                Sentiment, optimal weights, sector leaders, and what a third party would flag — all driven by the lookback you pick below.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Lookback</div>
+              <LookbackPills />
+            </div>
+          </div>
+        </section>
+
+        <div className="hairline" />
+
+        {/* ============ Sentiment engine ============ */}
+        <SentimentEngine holdings={sentimentHoldings} />
+
+        {/* ============ Optimal allocation + what-if ============ */}
+        <OptimalAllocation holdings={valuedHoldings} />
+
+        {/* ============ ETF tiles ============ */}
+        <ETFTiles />
+
+        {/* ============ Category leaders ============ */}
+        <CategoryLeaders />
+
+        {/* ============ Advisory insights ============ */}
+        <FinanceInsights />
+
+        {/* ============ Recommendations ============ */}
+        <section>
+          <SectionHeader eyebrow="Adjacent" title="Similar to what you hold" />
+          {recs.length === 0 ? (
+            <EmptyCard label="No recommendations yet" sub="Add a few holdings first — we'll suggest sector and theme peers." />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {recs.map(r => (
+                <div
+                  key={r.symbol}
+                  data-testid={`card-rec-${r.symbol}`}
+                  className="rounded-lg border border-border bg-card p-4 hover:border-teal/40 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div>
+                      <div className="font-mono text-sm font-medium">{r.symbol}</div>
+                      <div className="text-xs text-muted-foreground truncate max-w-[180px]">{r.name}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-mono tabular text-sm">
+                        {r.price != null ? `$${r.price.toLocaleString(undefined,{maximumFractionDigits:2})}` : "—"}
+                      </div>
+                      <div className={`font-mono tabular text-[11px] ${(r.dayChangePct ?? 0) >= 0 ? "text-teal" : "text-rose"}`}>
+                        {r.dayChangePct != null ? `${r.dayChangePct >= 0 ? "+" : ""}${r.dayChangePct.toFixed(2)}%` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground leading-relaxed">{r.reason}</div>
+                  <div className="mt-3 pt-3 border-t border-border/40 flex items-center justify-between gap-2">
+                    <RecFeedback
+                      kind="finance"
+                      externalId={r.symbol}
+                      why={`Adjacent to ${r.basedOn}`}
+                      reason={r.reason}
+                      title={`${r.symbol} — ${r.name}`}
+                      meta={{ symbol: r.symbol, name: r.name, kind: r.kind, basedOn: r.basedOn }}
+                      compact
+                      className="flex-1 min-w-0"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ============ Market movers ============ */}
+        <section data-testid="section-market-movers">
+          <div className="flex items-end justify-between mb-5 gap-4">
+            <div>
+              <div className="eyebrow mb-1">Market today</div>
+              <h2 className="font-display text-xl leading-tight">Biggest gainers & losers</h2>
+            </div>
+            <button
+              onClick={() => refetchMovers()}
+              disabled={moversLoading}
+              data-testid="button-refresh-movers"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={moversLoading ? "animate-spin" : ""} /> refresh
+            </button>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <MoversColumn title="Top 5 Gainers" items={movers?.gainers ?? []} positive />
+            <MoversColumn title="Top 5 Losers" items={movers?.losers ?? []} positive={false} />
+          </div>
+        </section>
+      </div>
     </LookbackProvider>
   );
 }
@@ -714,16 +729,20 @@ function EmptyCard({ label, sub }: { label: string; sub: string }) {
   );
 }
 
-/* ============ Finance wrapper with Subscriptions tab ============ */
-type FinanceTab = "portfolio" | "subscriptions";
+/* ============ Finance wrapper with tabs ============ */
+type FinanceTab = "portfolio" | "advisor" | "subscriptions";
 const FINANCE_TABS = [
   { id: "portfolio" as const, label: "Portfolio" },
+  { id: "advisor" as const, label: "Advisor" },
   { id: "subscriptions" as const, label: "Subscriptions" },
 ];
 
 export default function Finance() {
   const [tab, setTab] = useTabParam<FinanceTab>("portfolio");
-  const active: FinanceTab = tab === "subscriptions" ? "subscriptions" : "portfolio";
+  const active: FinanceTab =
+    tab === "advisor" ? "advisor" :
+    tab === "subscriptions" ? "subscriptions" :
+    "portfolio";
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -731,7 +750,9 @@ export default function Finance() {
         <div className="eyebrow">Finance</div>
         <PillTabs tabs={FINANCE_TABS} value={active} onChange={setTab} testIdPrefix="tab-finance" />
       </div>
-      {active === "portfolio" ? <FinanceMain /> : <Subscriptions />}
+      {active === "portfolio" && <FinancePortfolio />}
+      {active === "advisor" && <FinanceAdvisor />}
+      {active === "subscriptions" && <Subscriptions />}
     </div>
   );
 }
