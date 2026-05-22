@@ -108,6 +108,8 @@ function PlaidLinkBootstrap({
   onLinkToken: (token: string) => void;
   disabled?: boolean;
 }) {
+  const [debugInfo, setDebugInfo] = useState<string>("");
+
   const fetchLinkToken = useCallback(async () => {
     try {
       const res = await apiRequest("POST", "/api/plaid/link-token");
@@ -124,11 +126,17 @@ function PlaidLinkBootstrap({
   // would not match the OAuth state and Plaid Link would render blank
   // (the dreaded "blue screen").
   const resumeOAuthLink = useCallback(async () => {
+    setDebugInfo("resume: fetching inflight token\u2026");
     try {
       const res = await apiRequest("GET", "/api/plaid/link-token-current");
+      const bodyText = await res.text();
+      let body: any = null;
+      try { body = JSON.parse(bodyText); } catch {}
+
       if (!res.ok) {
+        setDebugInfo(`resume: HTTP ${res.status} — body: ${bodyText.slice(0,200)}`);
         onFetchError(
-          "Plaid OAuth session expired. Please click 'Connect brokerage' to try again.",
+          `Plaid OAuth resume failed (HTTP ${res.status}). ${bodyText.slice(0,120)}`,
         );
         // Strip the oauth_state_id so a refresh doesn't loop on the
         // resume path again.
@@ -138,13 +146,15 @@ function PlaidLinkBootstrap({
         }
         return;
       }
-      const data = await res.json();
-      if (!data.linkToken) {
+      if (!body?.linkToken) {
+        setDebugInfo(`resume: 200 but no linkToken in body: ${bodyText.slice(0,200)}`);
         onFetchError("Plaid OAuth session expired. Please try connecting again.");
         return;
       }
-      onLinkToken(data.linkToken);
+      setDebugInfo(`resume: got linkToken — mounting Plaid Link…`);
+      onLinkToken(body.linkToken);
     } catch (e: any) {
+      setDebugInfo(`resume: threw — ${e?.message || String(e)}`);
       onFetchError(e.message);
     }
   }, [onFetchError, onLinkToken]);
@@ -167,9 +177,16 @@ function PlaidLinkBootstrap({
 
   if (isOAuthReturn) {
     return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-plaid-resuming">
-        <span className="inline-block h-2 w-2 rounded-full bg-teal animate-pulse" />
-        <span>Resuming brokerage connection…</span>
+      <div className="space-y-2" data-testid="text-plaid-resuming">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="inline-block h-2 w-2 rounded-full bg-teal animate-pulse" />
+          <span>Resuming brokerage connection…</span>
+        </div>
+        {debugInfo && (
+          <div className="text-[10px] font-mono text-muted-foreground/60 break-all">
+            {debugInfo}
+          </div>
+        )}
       </div>
     );
   }
