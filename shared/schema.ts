@@ -5,8 +5,9 @@ import { z } from "zod";
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   username: text("username").notNull().unique(),
-  password: text("password"), // nullable for Spotify-only users
+  password: text("password"), // nullable for OAuth-only users
   spotifyId: text("spotify_id").unique(),
+  googleId: text("google_id").unique(),
   email: text("email"),
   displayName: text("display_name"),
   avatarUrl: text("avatar_url"),

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { storage } from "./storage";
 import { insertRatingSchema, insertHoldingSchema, insertWatchlistSchema, insertSubscriptionSchema, insertFoodSpotSchema, insertRecFeedbackSchema, insertUserItemSchema } from "@shared/schema";
 import * as Spotify from "./spotify";
+import * as Google from "./google";
 import * as Plaid from "./plaid";
 import { seedCatalog, type CatalogItem } from "./catalog-seed";
 import { seedEvents, type SeedEvent } from "./events-seed";
@@ -228,10 +229,73 @@ export async function registerRoutes(
     }
   });
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // Auth — Google OAuth as alternative login
+  // ──────────────────────────────────────────────────────────────────────────
+
+  app.get("/api/auth/google/login", (_req, res) => {
+    const cfg = Google.getAppConfig();
+    if (!cfg) {
+      return res.status(500).json({ error: "Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
+    }
+    const state = randomUUID();
+    pendingStates.set(state, Date.now());
+    const url = Google.buildAuthorizeUrl(state);
+    res.redirect(url);
+  });
+
+  app.get("/api/auth/google/callback", async (req, res) => {
+    const code = req.query.code as string | undefined;
+    const state = req.query.state as string | undefined;
+    const err = req.query.error as string | undefined;
+
+    if (err) return res.status(400).send(`Google authorization denied: ${err}`);
+    if (!code) return res.status(400).send("Missing authorization code");
+    if (!state || !pendingStates.has(state)) {
+      return res.status(400).send("Invalid or expired state parameter");
+    }
+    pendingStates.delete(state);
+
+    try {
+      const tok = await Google.exchangeCodeForToken(code);
+      const profile = await Google.getMe(tok.access_token);
+
+      // 1) Match by Google sub first.
+      let user = await storage.getUserByGoogleId(profile.sub);
+
+      // 2) If not found and email is verified, try linking to an existing
+      //    user with the same email (e.g. a Spotify-linked account).
+      if (!user && profile.email && profile.email_verified !== false) {
+        const existing = await storage.getUserByEmail(profile.email);
+        if (existing) {
+          user = await storage.updateUser(existing.id, { googleId: profile.sub });
+        }
+      }
+
+      // 3) Otherwise create a brand new user.
+      if (!user) {
+        user = await storage.createUser({
+          googleId: profile.sub,
+          email: profile.email,
+          displayName: profile.name || profile.given_name,
+          avatarUrl: profile.picture,
+        });
+      }
+
+      const session = await storage.createSession(user.id);
+      setSessionCookie(res, session.id, session.expiresAt);
+
+      res.redirect("/#/");
+    } catch (e: any) {
+      console.error("[google-callback]", e.message);
+      res.status(500).send(`Authentication failed: ${e.message}`);
+    }
+  });
+
   app.get("/api/auth/me", optionalAuth, (req, res) => {
     if (!req.user) return res.json({ user: null });
-    const { id, displayName, email, avatarUrl, spotifyId, createdAt } = req.user;
-    res.json({ user: { id, displayName, email, avatarUrl, spotifyId, createdAt } });
+    const { id, displayName, email, avatarUrl, spotifyId, googleId, createdAt } = req.user as any;
+    res.json({ user: { id, displayName, email, avatarUrl, spotifyId, googleId, createdAt } });
   });
 
   app.post("/api/auth/logout", optionalAuth, async (req, res) => {

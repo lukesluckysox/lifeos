@@ -6,13 +6,17 @@ export interface AuthUser {
   email: string | null;
   avatarUrl: string | null;
   spotifyId: string | null;
+  googleId: string | null;
   createdAt: number;
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
+  /** @deprecated kept for back-compat — alias of loginWithSpotify */
   login: () => void;
+  loginWithSpotify: () => void;
+  loginWithGoogle: () => void;
   logout: () => Promise<void>;
   refetch: () => Promise<void>;
 }
@@ -21,6 +25,8 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   loading: true,
   login: () => {},
+  loginWithSpotify: () => {},
+  loginWithGoogle: () => {},
   logout: async () => {},
   refetch: async () => {},
 });
@@ -53,8 +59,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchMe();
   }, [fetchMe]);
 
-  const login = useCallback(() => {
+  const loginWithSpotify = useCallback(() => {
     window.location.href = "/api/auth/spotify/login";
+  }, []);
+
+  const loginWithGoogle = useCallback(() => {
+    window.location.href = "/api/auth/google/login";
   }, []);
 
   const logout = useCallback(async () => {
@@ -66,7 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refetch: fetchMe }}>
+    <AuthContext.Provider value={{ user, loading, login: loginWithSpotify, loginWithSpotify, loginWithGoogle, logout, refetch: fetchMe }}>
       {children}
     </AuthContext.Provider>
   );

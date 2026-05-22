@@ -99,7 +99,7 @@ const CARD_LAYOUT = [
 ];
 
 export default function Landing() {
-  const { login } = useAuth();
+  const { loginWithSpotify, loginWithGoogle } = useAuth();
 
   // Demo mode is signalled via the URL hash query string — no storage,
   // matches the rest of the app's hash-routing convention.
@@ -171,27 +171,53 @@ export default function Landing() {
         })}
       </div>
 
-      {/* Enter button */}
-      <button
-        type="button"
-        data-testid="button-enter"
-        onClick={login}
-        className="
-          group relative px-10 py-3.5 rounded-full
-          bg-teal text-background font-display text-base tracking-wide
-          hover:bg-teal/90 active:scale-[0.98]
-          transition-all duration-200
-          shadow-[0_0_32px_0_rgba(0,188,188,0.25)]
-          hover:shadow-[0_0_48px_0_rgba(0,188,188,0.35)]
-        "
-      >
-        ENTER
-      </button>
+      {/* Sign-in options */}
+      <div className="flex flex-col items-stretch gap-3 w-full max-w-[280px]">
+        <button
+          type="button"
+          data-testid="button-login-google"
+          onClick={loginWithGoogle}
+          className="
+            group relative inline-flex items-center justify-center gap-3
+            px-6 py-3 rounded-full
+            bg-foreground text-background font-display text-sm tracking-wide
+            hover:bg-foreground/90 active:scale-[0.98]
+            transition-all duration-200
+          "
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path fill="#EA4335" d="M9 3.48c1.69 0 2.83.73 3.48 1.34l2.54-2.48C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.96l2.91 2.26C4.6 5.05 6.62 3.48 9 3.48z"/>
+            <path fill="#4285F4" d="M17.64 9.2c0-.74-.06-1.28-.19-1.84H9v3.34h4.96c-.1.83-.64 2.08-1.84 2.92l2.84 2.2c1.7-1.57 2.68-3.88 2.68-6.62z"/>
+            <path fill="#FBBC05" d="M3.88 10.78A5.54 5.54 0 0 1 3.58 9c0-.62.11-1.22.29-1.78L.96 4.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.04l2.92-2.26z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.84-2.2c-.76.53-1.78.9-3.12.9-2.38 0-4.4-1.57-5.12-3.74L.97 13.04C2.45 15.98 5.48 18 9 18z"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        <button
+          type="button"
+          data-testid="button-login-spotify"
+          onClick={loginWithSpotify}
+          className="
+            group relative inline-flex items-center justify-center gap-3
+            px-6 py-3 rounded-full
+            bg-teal text-background font-display text-sm tracking-wide
+            hover:bg-teal/90 active:scale-[0.98]
+            transition-all duration-200
+            shadow-[0_0_24px_0_rgba(0,188,188,0.2)]
+          "
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.5 17.3a.75.75 0 0 1-1.03.25c-2.82-1.72-6.37-2.11-10.55-1.16a.75.75 0 1 1-.33-1.46c4.57-1.04 8.5-.59 11.66 1.34.36.22.47.69.25 1.03zm1.47-3.27a.94.94 0 0 1-1.29.31c-3.23-1.99-8.16-2.56-11.98-1.4a.94.94 0 1 1-.55-1.8c4.37-1.33 9.8-.69 13.51 1.6.44.27.58.85.31 1.29zm.13-3.4c-3.87-2.3-10.27-2.51-13.97-1.39a1.13 1.13 0 1 1-.66-2.16c4.25-1.29 11.31-1.04 15.77 1.6a1.13 1.13 0 1 1-1.14 1.95z"/>
+          </svg>
+          Continue with Spotify
+        </button>
+      </div>
 
       {/* Sub-text */}
-      <div className="mt-6 text-center space-y-2">
-        <p className="text-xs text-muted-foreground/70">
-          Continue with Spotify · email read-only
+      <div className="mt-5 text-center space-y-2">
+        <p className="text-[11px] text-muted-foreground/60">
+          Email read-only · we never post on your behalf
         </p>
         <button
           type="button"

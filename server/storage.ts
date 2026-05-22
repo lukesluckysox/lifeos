@@ -60,6 +60,7 @@ sqlite.exec(`
     username TEXT NOT NULL UNIQUE,
     password TEXT,
     spotify_id TEXT UNIQUE,
+    google_id TEXT UNIQUE,
     email TEXT,
     display_name TEXT,
     avatar_url TEXT,
@@ -175,13 +176,36 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_plaid_items_user ON plaid_items(user_id);
 `);
 
+// Forward-compat: CREATE TABLE IF NOT EXISTS doesn't add columns to an
+// already-existing table. For each additive column we add over time, run
+// an idempotent ALTER TABLE that swallows the duplicate-column error.
+function safeAddColumn(table: string, definition: string) {
+  try {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+  } catch (e: any) {
+    // SQLite throws "duplicate column name" when the column already exists.
+    // Anything else, let it bubble.
+    if (!/duplicate column/i.test(e.message || "")) throw e;
+  }
+}
+safeAddColumn("users", "google_id TEXT");
+// Index can't be on UNIQUE retroactively in SQLite without rebuilding
+// the table, but a partial unique index gives us uniqueness for non-null
+// google_id values, which is what we actually need.
+try {
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL");
+} catch {}
+
 export const db = drizzle(sqlite);
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserBySpotifyId(spotifyId: string): Promise<User | undefined>;
-  createUser(user: { username?: string; password?: string; spotifyId?: string; email?: string; displayName?: string; avatarUrl?: string }): Promise<User>;
+  getUserByGoogleId(googleId: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  updateUser(id: number, patch: { googleId?: string; spotifyId?: string; displayName?: string; avatarUrl?: string }): Promise<User | undefined>;
+  createUser(user: { username?: string; password?: string; spotifyId?: string; googleId?: string; email?: string; displayName?: string; avatarUrl?: string }): Promise<User>;
 
   createSession(userId: number): Promise<{ id: string; expiresAt: number }>;
   getSessionUser(sessionId: string): Promise<User | null>;
@@ -234,12 +258,28 @@ export class DatabaseStorage implements IStorage {
   async getUserBySpotifyId(spotifyId: string): Promise<User | undefined> {
     return db.select().from(users).where(eq(users.spotifyId, spotifyId)).get();
   }
-  async createUser(u: { username?: string; password?: string; spotifyId?: string; email?: string; displayName?: string; avatarUrl?: string }): Promise<User> {
-    const username = u.username || u.email?.split("@")[0] || u.spotifyId || `user_${Date.now()}`;
+  async getUserByGoogleId(googleId: string): Promise<User | undefined> {
+    return db.select().from(users).where(eq(users.googleId, googleId)).get();
+  }
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    return db.select().from(users).where(eq(users.email, email)).get();
+  }
+  async updateUser(id: number, patch: { googleId?: string; spotifyId?: string; displayName?: string; avatarUrl?: string }): Promise<User | undefined> {
+    const set: Record<string, any> = {};
+    if (patch.googleId !== undefined) set.googleId = patch.googleId;
+    if (patch.spotifyId !== undefined) set.spotifyId = patch.spotifyId;
+    if (patch.displayName !== undefined) set.displayName = patch.displayName;
+    if (patch.avatarUrl !== undefined) set.avatarUrl = patch.avatarUrl;
+    if (Object.keys(set).length === 0) return db.select().from(users).where(eq(users.id, id)).get();
+    return db.update(users).set(set).where(eq(users.id, id)).returning().get();
+  }
+  async createUser(u: { username?: string; password?: string; spotifyId?: string; googleId?: string; email?: string; displayName?: string; avatarUrl?: string }): Promise<User> {
+    const username = u.username || u.email?.split("@")[0] || u.spotifyId || u.googleId || `user_${Date.now()}`;
     return db.insert(users).values({
       username,
       password: u.password ?? null,
       spotifyId: u.spotifyId ?? null,
+      googleId: u.googleId ?? null,
       email: u.email ?? null,
       displayName: u.displayName ?? null,
       avatarUrl: u.avatarUrl ?? null,
