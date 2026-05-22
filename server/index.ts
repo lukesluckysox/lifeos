@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express, { Response, NextFunction } from 'express';
 import type { Request } from 'express';
+import cookieParser from 'cookie-parser';
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
@@ -13,6 +14,8 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+app.use(cookieParser());
 
 app.use(
   express.json({

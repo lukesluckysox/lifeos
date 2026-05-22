@@ -1,54 +1,88 @@
 /**
- * Spotify Web API client backed by a stored refresh token.
+ * Spotify Web API client.
  *
- * Setup: user creates a Spotify dev app, sets redirect URI to
- *   http://localhost:5000/api/spotify/callback
- * and provides Client ID + Client Secret as env vars or via /api/spotify/config.
+ * App-wide config: SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI from env.
+ * Per-user refresh tokens stored in secrets table keyed by userId.
  *
- * Tokens (refresh) and config live in the `secrets` table so they survive restarts and deploys.
+ * For Spotify-as-login OAuth flow:
+ *   GET /api/auth/spotify/login  → redirects to Spotify authorize
+ *   GET /api/auth/spotify/callback → exchanges code, creates user session
  */
 import { storage } from "./storage";
 
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
 const API_BASE = "https://api.spotify.com/v1";
 
-// In-memory cache of the current access token (refresh tokens are long-lived).
-let cachedAccess: { token: string; expiresAt: number } | null = null;
-
 export type SpotifyConfig = { clientId: string; clientSecret: string; redirectUri: string };
 
-export async function getConfig(): Promise<SpotifyConfig | null> {
-  const clientId = (await storage.getSecret("spotify_client_id")) || process.env.SPOTIFY_CLIENT_ID || "";
-  const clientSecret = (await storage.getSecret("spotify_client_secret")) || process.env.SPOTIFY_CLIENT_SECRET || "";
-  const redirectUri = (await storage.getSecret("spotify_redirect_uri")) || process.env.SPOTIFY_REDIRECT_URI || "http://localhost:5000/api/spotify/callback";
+export function getAppConfig(): SpotifyConfig | null {
+  const clientId = process.env.SPOTIFY_CLIENT_ID || "";
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET || "";
+  const redirectUri = process.env.SPOTIFY_REDIRECT_URI || "http://127.0.0.1:5000/api/auth/spotify/callback";
   if (!clientId || !clientSecret) return null;
   return { clientId, clientSecret, redirectUri };
 }
 
-export async function saveConfig(c: { clientId: string; clientSecret: string; redirectUri?: string }) {
-  await storage.setSecret("spotify_client_id", c.clientId);
-  await storage.setSecret("spotify_client_secret", c.clientSecret);
-  if (c.redirectUri) await storage.setSecret("spotify_redirect_uri", c.redirectUri);
+// ── Per-user token cache ──────────────────────────────────────────────────────
+const userTokenCache = new Map<number, { token: string; expiresAt: number }>();
+
+export async function getUserRefreshToken(userId: number): Promise<string | null> {
+  return (await storage.getSecret(userId, "spotify_refresh_token")) || null;
 }
 
-export async function getRefreshToken(): Promise<string | null> {
-  return (await storage.getSecret("spotify_refresh_token")) || null;
+export async function saveUserRefreshToken(userId: number, token: string): Promise<void> {
+  await storage.setSecret(userId, "spotify_refresh_token", token);
+  userTokenCache.delete(userId); // force re-fetch
 }
 
-export async function saveRefreshToken(token: string) {
-  await storage.setSecret("spotify_refresh_token", token);
-  cachedAccess = null; // force refresh next call
+export async function clearUserRefreshToken(userId: number): Promise<void> {
+  await storage.setSecret(userId, "spotify_refresh_token", "");
+  userTokenCache.delete(userId);
 }
 
-export async function clearAuth() {
-  await storage.setSecret("spotify_refresh_token", "");
-  cachedAccess = null;
+/** Get a fresh access token for a specific user. */
+async function getUserAccessToken(userId: number): Promise<string> {
+  const cached = userTokenCache.get(userId);
+  if (cached && cached.expiresAt > Date.now() + 30_000) return cached.token;
+
+  const cfg = getAppConfig();
+  const refresh = await getUserRefreshToken(userId);
+  if (!cfg || !refresh) throw new Error("Spotify not authorized for this user");
+
+  const auth = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString("base64");
+  const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refresh });
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${auth}` },
+    body: body.toString(),
+  });
+  if (!res.ok) throw new Error(`Spotify refresh failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  userTokenCache.set(userId, { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 });
+  if (data.refresh_token && data.refresh_token !== refresh) {
+    await saveUserRefreshToken(userId, data.refresh_token);
+  }
+  return data.access_token;
 }
 
-/** Exchange an authorization code for a refresh+access token pair. */
+async function userApi<T = any>(userId: number, path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
+  const token = await getUserAccessToken(userId);
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  }
+  const url = `${API_BASE}${path}${qs.toString() ? `?${qs}` : ""}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Spotify API ${path} ${res.status}: ${await res.text()}`);
+  return await res.json();
+}
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+
+/** Exchange an authorization code for tokens. */
 export async function exchangeCodeForToken(code: string): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
-  const cfg = await getConfig();
-  if (!cfg) throw new Error("Spotify config missing");
+  const cfg = getAppConfig();
+  if (!cfg) throw new Error("Spotify app config missing");
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -64,46 +98,48 @@ export async function exchangeCodeForToken(code: string): Promise<{ access_token
   return await res.json();
 }
 
-/** Ensure we have a fresh access token, refreshing if needed. */
-async function getAccessToken(): Promise<string> {
-  if (cachedAccess && cachedAccess.expiresAt > Date.now() + 30_000) return cachedAccess.token;
-  const cfg = await getConfig();
-  const refresh = await getRefreshToken();
-  if (!cfg || !refresh) throw new Error("Spotify not authorized");
-  const auth = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString("base64");
-  const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refresh });
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${auth}` },
-    body: body.toString(),
+/** Fetch /me profile from Spotify. */
+export async function getMe(accessToken: string): Promise<{ id: string; email: string; display_name: string; images: { url: string }[] }> {
+  const res = await fetch(`${API_BASE}/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!res.ok) throw new Error(`Spotify refresh failed: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  cachedAccess = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
-  // Spotify may return a new refresh_token; persist if it does
-  if (data.refresh_token && data.refresh_token !== refresh) {
-    await saveRefreshToken(data.refresh_token);
-  }
-  return cachedAccess.token;
-}
-
-async function api<T = any>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
-  const token = await getAccessToken();
-  const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
-  }
-  const url = `${API_BASE}${path}${qs.toString() ? `?${qs}` : ""}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) throw new Error(`Spotify API ${path} ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`Spotify /me failed: ${res.status}`);
   return await res.json();
 }
 
-/* ------------ public endpoints used by /api/spotify/* ------------ */
+export function buildAuthorizeUrl(state: string): string {
+  const cfg = getAppConfig();
+  if (!cfg) throw new Error("Spotify app config missing");
+  const scopes = [
+    "user-read-email",
+    "user-read-private",
+    "user-read-recently-played",
+    "user-top-read",
+    "user-read-currently-playing",
+    "user-follow-read",
+    "user-library-read",
+  ];
+  const qs = new URLSearchParams({
+    response_type: "code",
+    client_id: cfg.clientId,
+    scope: scopes.join(" "),
+    redirect_uri: cfg.redirectUri,
+    state,
+  });
+  return `https://accounts.spotify.com/authorize?${qs}`;
+}
 
-export async function getRecentlyPlayed(limit = 20) {
-  // GET /me/player/recently-played
-  const data: any = await api("/me/player/recently-played", { limit });
+/** User-scoped status check. */
+export async function userStatus(userId: number): Promise<{ configured: boolean; authorized: boolean }> {
+  const cfg = getAppConfig();
+  const refresh = await getUserRefreshToken(userId);
+  return { configured: !!cfg, authorized: !!(cfg && refresh) };
+}
+
+// ── Per-user Spotify API calls ────────────────────────────────────────────────
+
+export async function getRecentlyPlayed(userId: number, limit = 20) {
+  const data: any = await userApi(userId, "/me/player/recently-played", { limit });
   const tracks = (data.items || []).map((it: any) => ({
     id: it.track.id,
     name: it.track.name,
@@ -117,9 +153,8 @@ export async function getRecentlyPlayed(limit = 20) {
   return { source: "spotify-recently-played", tracks, asOf: new Date().toISOString() };
 }
 
-export async function getTopTracks(timeRange: "short_term" | "medium_term" | "long_term" = "short_term", limit = 20) {
-  // GET /me/top/tracks (short_term = ~4 weeks)
-  const data: any = await api("/me/top/tracks", { time_range: timeRange, limit });
+export async function getTopTracks(userId: number, timeRange: "short_term" | "medium_term" | "long_term" = "short_term", limit = 20) {
+  const data: any = await userApi(userId, "/me/top/tracks", { time_range: timeRange, limit });
   const tracks = (data.items || []).map((it: any) => ({
     id: it.id,
     name: it.name,
@@ -133,9 +168,8 @@ export async function getTopTracks(timeRange: "short_term" | "medium_term" | "lo
   return { source: "spotify-top-tracks", timeRange, tracks, asOf: new Date().toISOString() };
 }
 
-export async function getFollowedArtists(limit = 50): Promise<Array<{ id: string; name: string; url?: string; image?: string }>> {
-  // GET /me/following?type=artist
-  const data: any = await api("/me/following", { type: "artist", limit });
+export async function getFollowedArtists(userId: number, limit = 50): Promise<Array<{ id: string; name: string; url?: string; image?: string }>> {
+  const data: any = await userApi(userId, "/me/following", { type: "artist", limit });
   return (data.artists?.items || []).map((a: any) => ({
     id: a.id,
     name: a.name,
@@ -144,18 +178,16 @@ export async function getFollowedArtists(limit = 50): Promise<Array<{ id: string
   }));
 }
 
-export async function getNewReleasesFromFollowed(opts: { limit?: number; daysBack?: number } = {}) {
+export async function getNewReleasesFromFollowed(userId: number, opts: { limit?: number; daysBack?: number } = {}) {
   const limit = opts.limit ?? 20;
   const daysBack = opts.daysBack ?? 60;
   const cutoff = Date.now() - daysBack * 86400000;
-  const artists = await getFollowedArtists(50);
-  // Spotify's "new releases" endpoint is global; for "new releases from your artists" we need per-artist albums.
-  // Throttle: hit at most 20 artists.
+  const artists = await getFollowedArtists(userId, 50);
   const subset = artists.slice(0, 20);
   const all: any[] = [];
   for (const a of subset) {
     try {
-      const data: any = await api(`/artists/${a.id}/albums`, { include_groups: "album,single", limit: 5, market: "US" });
+      const data: any = await userApi(userId, `/artists/${a.id}/albums`, { include_groups: "album,single", limit: 5, market: "US" });
       for (const al of (data.items || [])) {
         const ts = Date.parse(al.release_date || "");
         if (Number.isFinite(ts) && ts >= cutoff) {
@@ -171,12 +203,9 @@ export async function getNewReleasesFromFollowed(opts: { limit?: number; daysBac
           });
         }
       }
-    } catch {
-      // skip on failure
-    }
+    } catch { /* skip */ }
     if (all.length >= limit * 3) break;
   }
-  // sort newest first, dedupe by id, cap
   const seen = new Set<string>();
   const sorted = all
     .sort((x, y) => (y.releaseDate || "").localeCompare(x.releaseDate || ""))
@@ -185,26 +214,26 @@ export async function getNewReleasesFromFollowed(opts: { limit?: number; daysBac
   return { source: "spotify-new-releases", tracks: sorted, asOf: new Date().toISOString() };
 }
 
+// ── Legacy app-level helpers (kept for backward compat within routes that don't have userId) ──
+
+/** App-level status (checks if app creds exist). */
 export async function status(): Promise<{ configured: boolean; authorized: boolean }> {
-  const cfg = await getConfig();
-  const refresh = await getRefreshToken();
-  return { configured: !!cfg, authorized: !!(cfg && refresh) };
+  const cfg = getAppConfig();
+  return { configured: !!cfg, authorized: false };
 }
 
-export function buildAuthorizeUrl(cfg: SpotifyConfig, state: string): string {
-  const scopes = [
-    "user-read-recently-played",
-    "user-top-read",
-    "user-follow-read",
-    "user-read-private",
-    "user-library-read",
-  ];
-  const qs = new URLSearchParams({
-    response_type: "code",
-    client_id: cfg.clientId,
-    scope: scopes.join(" "),
-    redirect_uri: cfg.redirectUri,
-    state,
-  });
-  return `https://accounts.spotify.com/authorize?${qs}`;
+// Keep legacy getConfig / saveConfig for the existing /api/spotify/config flow
+export async function getConfig() {
+  return getAppConfig();
 }
+
+export async function saveConfig(c: { clientId: string; clientSecret: string; redirectUri?: string }) {
+  // In the new model, Spotify creds come from env — but keep this for legacy/admin use
+  console.warn("[spotify] saveConfig called, but credentials are now env-based. Set SPOTIFY_CLIENT_ID/SECRET in environment.");
+}
+
+// ── Backward-compat stubs for any residual callers ──────────────────────────
+export async function getRefreshToken(): Promise<string | null> { return null; }
+export async function saveRefreshToken(_token: string) {}
+export async function clearAuth() {}
+export function buildAuthorizeUrlLegacy(cfg: SpotifyConfig, state: string): string { return buildAuthorizeUrl(state); }

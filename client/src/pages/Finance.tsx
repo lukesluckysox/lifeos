@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, Sparkles, ArrowUpRight } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
+import { PlaidConnect } from "@/components/PlaidConnect";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useMode } from "@/components/ModeProvider";
 import { useToast } from "@/hooks/use-toast";
@@ -184,6 +185,9 @@ function FinanceMain() {
       </section>
 
       <div className="hairline" />
+
+      {/* ============ Plaid brokerage connect ============ */}
+      {mode !== "demo" && <PlaidConnect />}
 
       {/* ============ Advisory insights ============ */}
       <FinanceInsights />
