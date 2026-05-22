@@ -1,10 +1,9 @@
-import { Plus, MapPin, Compass, Route, Calendar, Sparkles, ExternalLink } from "lucide-react";
+import { MapPin, Compass, Route, Calendar, Sparkles, ExternalLink } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { SectionHeader } from "@/components/SectionHeader";
 import { AddItem } from "@/components/AddItem";
 import { RecFeedback } from "@/components/RecFeedback";
 import { LearningHint } from "@/components/LearningHint";
-import { entities, relations } from "@/data/graph";
 import { placeRecs } from "@/data/recs";
 import { apiRequest } from "@/lib/queryClient";
 import { useMode } from "@/components/ModeProvider";
@@ -43,6 +42,16 @@ type PlaceEvent = {
 };
 type PlacesEvents = { source: "ticketmaster" | "none"; city: string; events: PlaceEvent[]; learning?: { dropped?: number; boosted?: number; basis?: string[] | number } };
 
+type PinnedPlace = {
+  id: number;
+  kind: string;
+  title: string;
+  subtitle: string | null;
+  url: string | null;
+  meta: string | null;
+  createdAt: number;
+};
+
 function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
@@ -62,16 +71,17 @@ function PlacesMain() {
   const { mode, withMode } = useMode();
   const { city } = useCity();
 
-  const visited = new Set(
-    relations.filter((r) => r.from === "user" && r.kind === "visited").map((r) => r.to),
-  );
-
-  const places = entities.filter((e) => e.kind === "place" && visited.has(e.id));
-  const clusters = new Map<string, typeof places>();
-  for (const p of places) {
-    const c = String(p.meta?.cluster ?? "other");
-    if (!clusters.has(c)) clusters.set(c, []);
-    clusters.get(c)!.push(p);
+  const pinnedQuery = useQuery<PinnedPlace[]>({
+    queryKey: ["/api/user-items", "place"],
+    queryFn: async () => (await apiRequest("GET", "/api/user-items?kind=place")).json(),
+  });
+  const pinnedPlaces = pinnedQuery.data ?? [];
+  // Group pinned places by subtitle (city/neighborhood). Falls back to "Other".
+  const pinnedClusters = new Map<string, PinnedPlace[]>();
+  for (const p of pinnedPlaces) {
+    const key = (p.subtitle?.trim() || "Other").trim();
+    if (!pinnedClusters.has(key)) pinnedClusters.set(key, []);
+    pinnedClusters.get(key)!.push(p);
   }
   const recs = placeRecs();
 
@@ -315,43 +325,77 @@ function PlacesMain() {
         )}
       </section>
 
-      {/* Clusters as a vertical tree */}
+      {/* Pinned places — real user-saved data, grouped by city / subtitle */}
       <section>
-        <SectionHeader eyebrow="Memory clusters" title="Places, grouped by feel" />
-        <div className="space-y-8">
-          {Array.from(clusters.entries()).map(([cluster, list]) => (
-            <div key={cluster}>
-              <div className="flex items-baseline gap-3 mb-3">
-                <div className="font-display text-lg">{CLUSTER_LABELS[cluster] ?? cluster}</div>
-                <div className="font-mono text-[11px] text-muted-foreground tabular">
-                  {list.length} {list.length === 1 ? "place" : "places"}
-                </div>
-              </div>
-              <div className="relative pl-6 border-l border-border">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {list.map((p) => (
-                    <div key={p.id} className="rounded-lg border border-border bg-card p-4 relative">
-                      <div className="absolute -left-[1.625rem] top-5 h-px w-4 bg-border" />
-                      <div className="absolute -left-[1.825rem] top-[1.1rem] h-1.5 w-1.5 rounded-full bg-gold" />
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="font-display text-base leading-tight">{p.name}</div>
-                          <div className="font-mono text-[10px] text-muted-foreground mt-1 uppercase tracking-wider">
-                            {String(p.meta?.region ?? "")}
-                          </div>
-                        </div>
-                        <MapPin size={13} className="text-muted-foreground shrink-0" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+          <SectionHeader
+            eyebrow="Your pinned places"
+            title="Places you've saved"
+            description="Grouped by city. Add a place and it shows up here."
+          />
+          <AddItem
+            kind="place"
+            label="Pin a place"
+            titlePlaceholder="Place name"
+            subtitlePlaceholder="City or neighborhood"
+            showUrl
+            size="compact"
+            invalidateKeys={[["/api/user-items"], ["/api/user-items", "place"]]}
+          />
         </div>
-        <button data-testid="button-add-place" className="mt-6 w-full rounded-lg border border-dashed border-border bg-card/20 px-5 py-4 text-sm text-muted-foreground hover:text-foreground hover:border-gold/40 transition-colors flex items-center justify-center gap-2">
-          <Plus size={14} /> Log a place
-        </button>
+        {pinnedQuery.isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-border bg-card/40 p-4 h-20 animate-pulse" />
+            ))}
+          </div>
+        ) : pinnedPlaces.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-pinned-places">
+            <MapPin size={20} className="mx-auto text-muted-foreground mb-2" />
+            <div className="text-sm text-muted-foreground">No pinned places yet.</div>
+            <div className="text-xs text-muted-foreground/70 mt-1">Pin a place above and it'll appear here, grouped by city.</div>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {Array.from(pinnedClusters.entries()).map(([groupKey, list]) => (
+              <div key={groupKey}>
+                <div className="flex items-baseline gap-3 mb-3">
+                  <div className="font-display text-lg" data-testid={`text-pinned-group-${slugify(groupKey)}`}>{groupKey}</div>
+                  <div className="font-mono text-[11px] text-muted-foreground tabular">
+                    {list.length} {list.length === 1 ? "place" : "places"}
+                  </div>
+                </div>
+                <div className="relative pl-6 border-l border-border">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {list.map((p) => (
+                      <div key={p.id} className="rounded-lg border border-border bg-card p-4 relative" data-testid={`card-pinned-place-${p.id}`}>
+                        <div className="absolute -left-[1.625rem] top-5 h-px w-4 bg-border" />
+                        <div className="absolute -left-[1.825rem] top-[1.1rem] h-1.5 w-1.5 rounded-full bg-gold" />
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-display text-base leading-tight truncate">{p.title}</div>
+                            {p.subtitle && (
+                              <div className="font-mono text-[10px] text-muted-foreground mt-1 uppercase tracking-wider truncate">
+                                {p.subtitle}
+                              </div>
+                            )}
+                          </div>
+                          {p.url ? (
+                            <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors shrink-0" data-testid={`link-pinned-place-${p.id}`}>
+                              <ExternalLink size={13} />
+                            </a>
+                          ) : (
+                            <MapPin size={13} className="text-muted-foreground shrink-0" />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Recommendations */}

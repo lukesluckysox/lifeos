@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, Sparkles, ArrowUpRight } from "lucide-react";
+import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, Sparkles, ArrowUpRight, Building2 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { PlaidConnect } from "@/components/PlaidConnect";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -41,6 +41,7 @@ interface BullBearResp { items: BullBearItem[]; asOf: string; seed: number }
 interface MoverItem { symbol: string; name: string; price: number; dayChangePct: number; dayChangeAbs: number; marketCap?: number; volume?: number }
 interface MoversResp { gainers: MoverItem[]; losers: MoverItem[]; asOf: string }
 interface IndexQuoteResp { symbol: string; kind: string; name: string; currentPrice: number; oneYearReturnPct: number; ytdReturnPct: number; series: { t: number; p: number }[] }
+interface PlaidItemRow { id: number; itemId: string; institutionName: string; createdAt: number }
 
 /* ---------- Component ---------- */
 
@@ -52,6 +53,13 @@ function FinanceMain() {
   const { data: portfolio } = useQuery<PortfolioResp>({
     queryKey: ["/api/portfolio", mode],
     queryFn: async () => (await apiRequest("GET", withMode("/api/portfolio"))).json(),
+  });
+
+  /* Connected brokerages (real Plaid items) — hidden in demo mode */
+  const { data: plaidItems } = useQuery<PlaidItemRow[]>({
+    queryKey: ["/api/plaid/items"],
+    queryFn: async () => (await apiRequest("GET", "/api/plaid/items")).json(),
+    enabled: mode !== "demo",
   });
 
   /* Combined holdings */
@@ -169,6 +177,28 @@ function FinanceMain() {
   return (
     <LookbackProvider>
     <div className="space-y-16 animate-fade-in">
+      {/* ============ Connected brokerages strip (real Plaid items) ============ */}
+      {mode !== "demo" && plaidItems && plaidItems.length > 0 && (
+        <div
+          className="flex items-center gap-2 flex-wrap text-xs font-mono uppercase tracking-wider text-muted-foreground -mb-10"
+          data-testid="strip-connected-brokerages"
+        >
+          <Building2 size={12} className="text-teal" />
+          <span className="text-muted-foreground/70">Connected</span>
+          {plaidItems.map((it, idx) => (
+            <span key={it.id} className="flex items-center gap-2">
+              <span
+                className="rounded-full border border-teal/30 bg-teal/5 text-foreground/90 px-2 py-0.5 normal-case tracking-normal"
+                data-testid={`chip-brokerage-${it.id}`}
+              >
+                {it.institutionName}
+              </span>
+              {idx < plaidItems.length - 1 && <span className="text-muted-foreground/40">·</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* ============ Net worth headline ============ */}
       <section>
         <div className="eyebrow mb-3">

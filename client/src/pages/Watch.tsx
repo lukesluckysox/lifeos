@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AddItem } from "@/components/AddItem";
-import { Search as SearchIcon, Tv, Film as FilmIcon, Sparkles, Heart, ThumbsUp, X } from "lucide-react";
+import { Search as SearchIcon, Tv, Film as FilmIcon, Sparkles, Heart, ThumbsUp, X, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { RatingBar } from "@/components/RatingBar";
 import { ScoreBreakdown } from "@/components/ScoreBreakdown";
@@ -29,10 +29,13 @@ interface CatalogItem {
 type Filter = "all" | "show" | "film";
 
 function WatchCatalog() {
+  const qc = useQueryClient();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [seedQuery, setSeedQuery] = useState("");
   const [seedDebounced, setSeedDebounced] = useState("");
+  // Pagination for "rest of the catalog" — 6 per page (2 rows × 3)
+  const [restPage, setRestPage] = useState(0);
 
   // Debounce the seed search so we don't hit /api/catalog on every keystroke
   useEffect(() => {
@@ -85,7 +88,16 @@ function WatchCatalog() {
   }, [data, liked, disliked, ratings]);
 
   const top = scored.slice(0, 6);
-  const rest = scored.slice(6);
+  const allRest = scored.slice(6);
+  const PER_PAGE = 6;
+  const restPageCount = Math.max(1, Math.ceil(allRest.length / PER_PAGE));
+
+  // Clamp the page index if the underlying catalog shrinks
+  useEffect(() => {
+    if (restPage >= restPageCount) setRestPage(0);
+  }, [restPageCount, restPage]);
+
+  const rest = allRest.slice(restPage * PER_PAGE, (restPage + 1) * PER_PAGE);
 
   const seedSuggestions = (seedResults?.items ?? []).slice(0, 6);
 
@@ -248,11 +260,22 @@ function WatchCatalog() {
 
       {/* Top recs */}
       <section>
-        <SectionHeader
-          eyebrow="Recommended"
-          title="Best matches against your library"
-          description="Sorted by score. Tap 'show why' on any card to see the weighted components."
-        />
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+          <SectionHeader
+            eyebrow="Recommended"
+            title="Best matches against your library"
+            description="Sorted by score. Tap 'show why' on any card to see the weighted components."
+          />
+          <button
+            type="button"
+            data-testid="button-best-matches-refresh"
+            onClick={() => qc.invalidateQueries({ queryKey: ["/api/catalog"] })}
+            className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded border border-border shrink-0"
+          >
+            <RefreshCw size={12} className={isLoading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {top.map(({ item, total, components, reasons }) => (
             <CatalogCard key={item.id} item={item} total={total} components={components} reasons={reasons} />
@@ -265,10 +288,39 @@ function WatchCatalog() {
         </div>
       </section>
 
-      {/* Rest */}
-      {rest.length > 0 && (
+      {/* Rest — paginated 6 at a time */}
+      {allRest.length > 0 && (
         <section>
-          <SectionHeader eyebrow="More" title="The rest of the catalog" />
+          <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
+            <SectionHeader eyebrow="More" title="The rest of the catalog" />
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="font-mono text-[11px] text-muted-foreground tabular" data-testid="text-rest-page">
+                {restPage + 1} / {restPageCount}
+              </span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  data-testid="button-rest-prev"
+                  onClick={() => setRestPage(p => Math.max(0, p - 1))}
+                  disabled={restPage === 0}
+                  aria-label="Previous page"
+                  className="h-8 w-8 grid place-items-center rounded border border-border text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <button
+                  type="button"
+                  data-testid="button-rest-next"
+                  onClick={() => setRestPage(p => Math.min(restPageCount - 1, p + 1))}
+                  disabled={restPage >= restPageCount - 1}
+                  aria-label="Next page"
+                  className="h-8 w-8 grid place-items-center rounded border border-border text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {rest.map(({ item, total, components, reasons }) => (
               <CatalogCard key={item.id} item={item} total={total} components={components} reasons={reasons} />
