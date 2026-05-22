@@ -294,8 +294,13 @@ export async function registerRoutes(
 
   app.get("/api/auth/me", optionalAuth, (req, res) => {
     if (!req.user) return res.json({ user: null });
-    const { id, displayName, email, avatarUrl, spotifyId, googleId, createdAt } = req.user as any;
-    res.json({ user: { id, displayName, email, avatarUrl, spotifyId, googleId, createdAt } });
+    const { id, displayName, email, avatarUrl, spotifyId, googleId, createdAt, onboardingCompleted } = req.user as any;
+    res.json({ user: { id, displayName, email, avatarUrl, spotifyId, googleId, createdAt, onboardingCompleted: !!onboardingCompleted } });
+  });
+
+  app.post("/api/auth/onboarding-completed", requireAuth, async (req, res) => {
+    await storage.updateUser(req.user!.id, { onboardingCompleted: 1 });
+    res.json({ ok: true });
   });
 
   app.post("/api/auth/logout", optionalAuth, async (req, res) => {
@@ -2040,6 +2045,95 @@ export async function registerRoutes(
       }
 
       res.json({ asOf: portfolio.asOf || new Date().toISOString(), totalValue, insights });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ============ Ask Lumen — AI assistant w/ page context ============
+  app.post("/api/ask-lumen", optionalAuth, async (req, res) => {
+    try {
+      const { prompt, context } = req.body as { prompt?: string; context?: any };
+      if (!prompt || typeof prompt !== "string" || prompt.length > 2000) {
+        return res.status(400).json({ message: "Prompt required (≤2000 chars)" });
+      }
+
+      const anthropicKey = process.env.ANTHROPIC_API_KEY;
+      const perplexityKey = process.env.PERPLEXITY_API_KEY;
+
+      // Compact context summary to keep prompts cheap
+      const ctxBits: string[] = [];
+      if (context?.page) ctxBits.push(`Current page: ${context.page}`);
+      if (context?.holdings?.length) {
+        const top = context.holdings.slice(0, 10).map((h: any) =>
+          `${h.ticker || h.symbol}: $${Math.round(h.value || 0)} (${(h.dayChangePct ?? 0).toFixed(1)}% today)`
+        );
+        ctxBits.push(`Top holdings: ${top.join(", ")}`);
+      }
+      if (context?.watchlist?.length) {
+        ctxBits.push(`Watchlist: ${context.watchlist.slice(0, 10).map((w: any) => w.symbol).join(", ")}`);
+      }
+      if (context?.places?.length) {
+        ctxBits.push(`Recent places: ${context.places.slice(0, 5).map((p: any) => p.name).join(", ")}`);
+      }
+      const ctxStr = ctxBits.length ? `\n\nContext:\n${ctxBits.join("\n")}` : "";
+
+      const system =
+        "You are Lumen, a concise personal life-OS assistant. The user is a developer named Jay in Hawaii who tracks finance, music, and places of interest. Give direct, specific answers in 1-3 short paragraphs. No filler. No disclaimers. Use plain text \u2014 no markdown headers, no bullet asterisks, just clean prose. Cite specific tickers/numbers from context when relevant.";
+      const userMsg = prompt + ctxStr;
+
+      // Prefer Anthropic Claude if available, else Perplexity, else friendly stub
+      if (anthropicKey) {
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": anthropicKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-3-5-sonnet-latest",
+            max_tokens: 600,
+            system,
+            messages: [{ role: "user", content: userMsg }],
+          }),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          return res.status(500).json({ message: `Claude API: ${t.slice(0, 200)}` });
+        }
+        const j: any = await r.json();
+        const answer = j.content?.[0]?.text || "(no response)";
+        return res.json({ answer, model: "claude-3.5-sonnet" });
+      }
+
+      if (perplexityKey) {
+        const r = await fetch("https://api.perplexity.ai/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${perplexityKey}` },
+          body: JSON.stringify({
+            model: "sonar",
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: userMsg },
+            ],
+            max_tokens: 600,
+          }),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          return res.status(500).json({ message: `Perplexity API: ${t.slice(0, 200)}` });
+        }
+        const j: any = await r.json();
+        const answer = j.choices?.[0]?.message?.content || "(no response)";
+        return res.json({ answer, model: "sonar" });
+      }
+
+      return res.json({
+        answer:
+          "Lumen needs an API key to think. Add ANTHROPIC_API_KEY (preferred) or PERPLEXITY_API_KEY to your Railway env vars and redeploy.",
+        model: "stub",
+      });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

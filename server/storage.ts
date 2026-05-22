@@ -199,6 +199,7 @@ function safeAddColumn(table: string, definition: string) {
   }
 }
 safeAddColumn("users", "google_id TEXT");
+safeAddColumn("users", "onboarding_completed INTEGER DEFAULT 0");
 // Index can't be on UNIQUE retroactively in SQLite without rebuilding
 // the table, but a partial unique index gives us uniqueness for non-null
 // google_id values, which is what we actually need.
@@ -214,7 +215,7 @@ export interface IStorage {
   getUserBySpotifyId(spotifyId: string): Promise<User | undefined>;
   getUserByGoogleId(googleId: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
-  updateUser(id: number, patch: { googleId?: string; spotifyId?: string; displayName?: string; avatarUrl?: string }): Promise<User | undefined>;
+  updateUser(id: number, patch: { googleId?: string; spotifyId?: string; displayName?: string; avatarUrl?: string; onboardingCompleted?: number }): Promise<User | undefined>;
   createUser(user: { username?: string; password?: string; spotifyId?: string; googleId?: string; email?: string; displayName?: string; avatarUrl?: string }): Promise<User>;
 
   createSession(userId: number): Promise<{ id: string; expiresAt: number }>;
@@ -274,12 +275,13 @@ export class DatabaseStorage implements IStorage {
   async getUserByEmail(email: string): Promise<User | undefined> {
     return db.select().from(users).where(eq(users.email, email)).get();
   }
-  async updateUser(id: number, patch: { googleId?: string; spotifyId?: string; displayName?: string; avatarUrl?: string }): Promise<User | undefined> {
+  async updateUser(id: number, patch: { googleId?: string; spotifyId?: string; displayName?: string; avatarUrl?: string; onboardingCompleted?: number }): Promise<User | undefined> {
     const set: Record<string, any> = {};
     if (patch.googleId !== undefined) set.googleId = patch.googleId;
     if (patch.spotifyId !== undefined) set.spotifyId = patch.spotifyId;
     if (patch.displayName !== undefined) set.displayName = patch.displayName;
     if (patch.avatarUrl !== undefined) set.avatarUrl = patch.avatarUrl;
+    if (patch.onboardingCompleted !== undefined) set.onboardingCompleted = patch.onboardingCompleted;
     if (Object.keys(set).length === 0) return db.select().from(users).where(eq(users.id, id)).get();
     return db.update(users).set(set).where(eq(users.id, id)).returning().get();
   }

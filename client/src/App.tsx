@@ -21,6 +21,10 @@ import Landing from "@/pages/Landing";
 import NotFound from "@/pages/not-found";
 import { useEffect } from "react";
 import { Logo } from "@/components/Logo";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { CommandPalette } from "@/components/CommandPalette";
+import { AskLumen } from "@/components/AskLumen";
+import { OnboardingTour } from "@/components/OnboardingTour";
 
 /**
  * Redirects via direct hash mutation.
@@ -52,14 +56,17 @@ function AppRouter() {
 
   return (
     <AppShell>
+      <CommandPalette />
+      <AskLumen />
+      <OnboardingTour />
       <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/music" component={Music} />
-        <Route path="/watch" component={Watch} />
-        <Route path="/events" component={Events} />
-        <Route path="/places" component={Places} />
-        <Route path="/finance" component={Finance} />
-        <Route path="/saved" component={Saved} />
+        <Route path="/"><ErrorBoundary label="Home page"><Home /></ErrorBoundary></Route>
+        <Route path="/music"><ErrorBoundary label="Music page"><Music /></ErrorBoundary></Route>
+        <Route path="/watch"><ErrorBoundary label="Watch page"><Watch /></ErrorBoundary></Route>
+        <Route path="/events"><ErrorBoundary label="Events page"><Events /></ErrorBoundary></Route>
+        <Route path="/places"><ErrorBoundary label="Places page"><Places /></ErrorBoundary></Route>
+        <Route path="/finance"><ErrorBoundary label="Finance page"><Finance /></ErrorBoundary></Route>
+        <Route path="/saved"><ErrorBoundary label="Saved page"><Saved /></ErrorBoundary></Route>
         {/* Legacy redirects */}
         <Route path="/film">{() => <Redirect to="/watch?tab=film" />}</Route>
         <Route path="/food">{() => <Redirect to="/places?tab=food" />}</Route>

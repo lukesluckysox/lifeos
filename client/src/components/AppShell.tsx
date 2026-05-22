@@ -106,6 +106,20 @@ export function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
 
+          {/* Cmd+K hint */}
+          <button
+            type="button"
+            data-testid="button-open-cmdk"
+            onClick={() => {
+              // Synthesize a Cmd+K keydown so the global listener picks it up.
+              document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+            }}
+            className="mx-3 mt-2 flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-border/60 hover:border-border hover:bg-accent/40 transition-colors text-left"
+          >
+            <span className="text-xs text-muted-foreground">Quick search</span>
+            <kbd className="font-mono text-[10px] text-muted-foreground bg-background border border-border rounded px-1.5 py-0.5">⌘K</kbd>
+          </button>
+
           <div className="mt-auto px-5 py-5 border-t border-border">
             <div className="eyebrow mb-2">signed in as</div>
             <div className="text-sm font-medium">Jay Thomas</div>

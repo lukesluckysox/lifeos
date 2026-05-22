@@ -18,6 +18,8 @@ import { SentimentEngine } from "@/components/SentimentEngine";
 import { OptimalAllocation } from "@/components/OptimalAllocation";
 import { ETFTiles } from "@/components/ETFTiles";
 import { CategoryLeaders } from "@/components/CategoryLeaders";
+import { LiveHeartbeat } from "@/components/LiveHeartbeat";
+import { PriceFlash } from "@/components/PriceFlash";
 
 /* ---------- Types ---------- */
 
@@ -238,8 +240,11 @@ function FinancePortfolio() {
 
       {/* ============ Net worth headline ============ */}
       <section>
-        <div className="eyebrow mb-3">
-          Finance {mode === "demo" && <span className="ml-2 text-gold">· demo</span>}
+        <div className="flex items-center gap-4 mb-3 flex-wrap">
+          <div className="eyebrow">
+            Finance {mode === "demo" && <span className="ml-2 text-gold">· demo</span>}
+          </div>
+          <LiveHeartbeat />
         </div>
         <div className="flex items-end justify-between flex-wrap gap-6">
           <div>
@@ -248,7 +253,7 @@ function FinancePortfolio() {
               className="font-display text-[clamp(2.5rem,5vw,4rem)] leading-none tabular"
               data-testid="text-net-worth"
             >
-              ${netWorth.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              <PriceFlash value={netWorth}>${netWorth.toLocaleString(undefined, { maximumFractionDigits: 2 })}</PriceFlash>
             </div>
             <div className="mt-3 flex items-center gap-2 text-sm">
               {dayChange >= 0 ? <TrendingUp size={14} className="text-teal" /> : <TrendingDown size={14} className="text-rose" />}

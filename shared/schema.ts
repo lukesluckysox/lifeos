@@ -12,6 +12,7 @@ export const users = sqliteTable("users", {
   displayName: text("display_name"),
   avatarUrl: text("avatar_url"),
   createdAt: integer("created_at").notNull(),
+  onboardingCompleted: integer("onboarding_completed").default(0),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
