@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { Sparkles, X, Send, Loader2 } from "lucide-react";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 
 /**
  * Floating "Ask Lumen" assistant.
@@ -48,23 +48,9 @@ export function AskLumen() {
     setLoading(true);
     setAnswer("");
     try {
-      // Pull whatever data is in TanStack cache for context
-      const portfolio: any = queryClient.getQueryData(["/api/portfolio"]);
-      const watchlist: any = queryClient.getQueryData(["/api/watchlist", "live"]) ||
-        queryClient.getQueryData(["/api/watchlist", "demo"]);
-
-      const holdings = [
-        ...(portfolio?.plaid?.holdings || []),
-        ...(portfolio?.manual?.holdings || []),
-      ];
-
-      const ctx = {
-        page: location,
-        holdings,
-        watchlist,
-      };
-
-      const r = await apiRequest("POST", "/api/ask-lumen", { prompt: p, context: ctx });
+      // Server reads holdings/watchlist/subscriptions/places/music itself.
+      // We only tell it which page the user is on for context.
+      const r = await apiRequest("POST", "/api/ask-lumen", { prompt: p, page: location });
       const j = await r.json();
       setAnswer(j.answer || "(empty response)");
       setModel(j.model || "");

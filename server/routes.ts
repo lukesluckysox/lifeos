@@ -2063,33 +2063,118 @@ export async function registerRoutes(
     }
   });
 
-  // ============ Ask Lumen — AI assistant w/ page context ============
+  // ============ Ask Lumen — AI assistant w/ full server-side context ============
   app.post("/api/ask-lumen", optionalAuth, async (req, res) => {
     try {
-      const { prompt, context } = req.body as { prompt?: string; context?: any };
+      const { prompt, page } = req.body as { prompt?: string; page?: string };
       if (!prompt || typeof prompt !== "string" || prompt.length > 2000) {
         return res.status(400).json({ message: "Prompt required (≤2000 chars)" });
       }
 
       const anthropicKey = process.env.ANTHROPIC_API_KEY;
       const perplexityKey = process.env.PERPLEXITY_API_KEY;
+      const userId = req.user?.id;
 
-      // Compact context summary to keep prompts cheap
+      // ── Gather everything Lumen could reference, in parallel ──────────────
       const ctxBits: string[] = [];
-      if (context?.page) ctxBits.push(`Current page: ${context.page}`);
-      if (context?.holdings?.length) {
-        const top = context.holdings.slice(0, 10).map((h: any) =>
-          `${h.ticker || h.symbol}: $${Math.round(h.value || 0)} (${(h.dayChangePct ?? 0).toFixed(1)}% today)`
-        );
-        ctxBits.push(`Top holdings: ${top.join(", ")}`);
+      if (page) ctxBits.push(`Current page: ${page}`);
+      ctxBits.push(`Today: ${new Date().toISOString().slice(0, 10)}`);
+
+      if (userId) {
+        const [holdings, watchlist, subs, places, userItems, plaidItems] = await Promise.all([
+          storage.listHoldings(userId).catch(() => [] as any[]),
+          storage.listWatchlist(userId).catch(() => [] as any[]),
+          storage.listSubscriptions(userId).catch(() => [] as any[]),
+          storage.listFoodSpots(userId).catch(() => [] as any[]),
+          storage.listUserItems(userId).catch(() => [] as any[]),
+          storage.getPlaidItems(userId).catch(() => [] as any[]),
+        ]);
+
+        // PORTFOLIO: pull live Plaid holdings if any items connected, else manual.
+        let allHoldings: any[] = [];
+        let plaidTotal = 0;
+        if (plaidItems.length) {
+          for (const item of plaidItems) {
+            try {
+              const raw: any = await Plaid.getInvestmentHoldings(item.accessToken);
+              const secById = new Map<string, any>();
+              for (const s of raw.securities || []) secById.set(s.security_id, s);
+              for (const h of raw.holdings || []) {
+                const sec = secById.get(h.security_id) || {};
+                allHoldings.push({
+                  ticker: sec.ticker_symbol || sec.proxy_security_id || "—",
+                  name: sec.name,
+                  value: h.institution_value,
+                  qty: h.quantity,
+                  inst: item.institutionName,
+                });
+                plaidTotal += h.institution_value || 0;
+              }
+            } catch { /* skip broken item */ }
+          }
+        }
+        const manualHoldings = (holdings || []).map((h: any) => ({
+          ticker: h.symbol, name: h.name, value: (h.shares || 0) * (h.lastPrice || h.costBasis || 0),
+        }));
+        allHoldings = [...allHoldings, ...manualHoldings];
+
+        if (allHoldings.length) {
+          const top = allHoldings
+            .sort((a, b) => (b.value || 0) - (a.value || 0))
+            .slice(0, 15)
+            .map((h) => `${h.ticker}: $${Math.round(h.value || 0).toLocaleString()}${h.inst ? ` @ ${h.inst}` : ""}`);
+          const total = allHoldings.reduce((s, h) => s + (h.value || 0), 0);
+          ctxBits.push(`Portfolio total: $${Math.round(total).toLocaleString()} across ${allHoldings.length} positions`);
+          ctxBits.push(`Top positions: ${top.join("; ")}`);
+        }
+
+        if (watchlist.length) {
+          ctxBits.push(`Watchlist (${watchlist.length}): ${watchlist.slice(0, 20).map((w: any) => w.symbol).join(", ")}`);
+        }
+
+        if (subs.length) {
+          const monthly = subs.reduce((s: number, x: any) => {
+            if (x.cadence === "monthly") return s + (x.amount || 0);
+            if (x.cadence === "yearly") return s + (x.amount || 0) / 12;
+            if (x.cadence === "weekly") return s + (x.amount || 0) * 4.33;
+            return s;
+          }, 0);
+          const list = subs.slice(0, 10).map((s: any) => `${s.name} $${s.amount}/${s.cadence}`).join(", ");
+          ctxBits.push(`Subscriptions (${subs.length}, ~$${monthly.toFixed(0)}/mo): ${list}`);
+        }
+
+        if (places.length) {
+          const list = places.slice(0, 10).map((p: any) =>
+            `${p.name}${p.city ? ` (${p.city})` : ""}${p.rating ? ` ${p.rating}\u2605` : ""}`
+          );
+          ctxBits.push(`Saved places (${places.length}): ${list.join(", ")}`);
+        }
+
+        if (userItems.length) {
+          const byKind = new Map<string, any[]>();
+          for (const it of userItems) {
+            const k = it.kind || "other";
+            if (!byKind.has(k)) byKind.set(k, []);
+            byKind.get(k)!.push(it);
+          }
+          for (const [kind, items] of byKind) {
+            ctxBits.push(`${kind} (${items.length}): ${items.slice(0, 8).map((i: any) => i.title || i.name).join(", ")}`);
+          }
+        }
       }
-      if (context?.watchlist?.length) {
-        ctxBits.push(`Watchlist: ${context.watchlist.slice(0, 10).map((w: any) => w.symbol).join(", ")}`);
+
+      // RECENT MUSIC: only if user has Spotify connected, pull last 20 plays.
+      if (userId) {
+        try {
+          const recent: any = await Spotify.getRecentlyPlayed(userId, 20).catch(() => null);
+          if (recent?.tracks?.length) {
+            const tracks = recent.tracks.slice(0, 10).map((t: any) => `${t.name} — ${t.artist}`);
+            ctxBits.push(`Recent listens: ${tracks.join("; ")}`);
+          }
+        } catch { /* spotify not connected, skip */ }
       }
-      if (context?.places?.length) {
-        ctxBits.push(`Recent places: ${context.places.slice(0, 5).map((p: any) => p.name).join(", ")}`);
-      }
-      const ctxStr = ctxBits.length ? `\n\nContext:\n${ctxBits.join("\n")}` : "";
+
+      const ctxStr = ctxBits.length ? `\n\nUser context (use this to give grounded answers):\n${ctxBits.join("\n")}` : "";
 
       const system =
         "You are Lumen, a concise personal life-OS assistant. The user is a developer named Jay in Hawaii who tracks finance, music, and places of interest. Give direct, specific answers in 1-3 short paragraphs. No filler. No disclaimers. Use plain text \u2014 no markdown headers, no bullet asterisks, just clean prose. Cite specific tickers/numbers from context when relevant.";
