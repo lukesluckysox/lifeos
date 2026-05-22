@@ -1,25 +1,15 @@
-import { MapPin, Compass, Route, Calendar, Sparkles, ExternalLink } from "lucide-react";
+import { MapPin, Compass, Route, Calendar, Sparkles, ExternalLink, Moon, Thermometer } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { SectionHeader } from "@/components/SectionHeader";
 import { AddItem } from "@/components/AddItem";
 import { RecFeedback } from "@/components/RecFeedback";
 import { LearningHint } from "@/components/LearningHint";
-import { placeRecs } from "@/data/recs";
 import { apiRequest } from "@/lib/queryClient";
 import { useMode } from "@/components/ModeProvider";
 import { useLocation as useCity } from "@/components/LocationProvider";
 import { PillTabs } from "@/components/PillTabs";
 import { useTabParam } from "@/hooks/useTabParam";
 import Food from "@/pages/Food";
-
-const CLUSTER_LABELS: Record<string, string> = {
-  "surf": "Surf breaks",
-  "scenic-drive": "Scenic drives",
-  "city": "Cities",
-  "restaurant": "Restaurants",
-  "hike": "Hikes",
-  "neighborhood": "Neighborhoods",
-};
 
 type Sight = { name: string; note: string; url?: string; pinned?: boolean; userItemId?: number };
 type Neighborhood = { name: string; note: string };
@@ -50,6 +40,30 @@ type PinnedPlace = {
   url: string | null;
   meta: string | null;
   createdAt: number;
+};
+
+type AtlasPath = {
+  id: string;
+  type: string;
+  name: string;
+  location: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  date: string | null;
+  note: string | null;
+  photoUrl: string | null;
+  weatherTemp: number | null;
+  weatherLabel: string | null;
+  moonPhase: number | null;
+  shareSlug: string | null;
+  atlasShareUrl: string | null;
+  createdAt: string;
+};
+type PathsResp = {
+  paths: AtlasPath[];
+  source: "atlas" | "cache" | "unconfigured" | "error";
+  configured: boolean;
+  atlasBaseUrl: string | null;
 };
 
 function slugify(s: string) {
@@ -83,7 +97,14 @@ function PlacesMain() {
     if (!pinnedClusters.has(key)) pinnedClusters.set(key, []);
     pinnedClusters.get(key)!.push(p);
   }
-  const recs = placeRecs();
+
+  // Atlas paths — real places logged in the sibling app
+  const pathsQuery = useQuery<PathsResp>({
+    queryKey: ["/api/paths"],
+    queryFn: async () => (await apiRequest("GET", "/api/paths")).json(),
+  });
+  const atlasPaths = pathsQuery.data?.paths ?? [];
+  const atlasConfigured = pathsQuery.data?.configured ?? false;
 
   const guideQuery = useQuery<TravelGuide>({
     queryKey: ["/api/travel-guide", city],
@@ -398,28 +419,111 @@ function PlacesMain() {
         )}
       </section>
 
-      {/* Recommendations */}
+      {/* Atlas paths — real places logged in the sibling app */}
       <section>
         <SectionHeader
-          eyebrow="Worth a trip"
-          title="Spots that fit your pattern"
-          description="Unvisited places in clusters you keep returning to."
+          eyebrow="Paths"
+          title="Places you've logged in Atlas"
+          description="Pulled live from your Atlas paths — most recent first."
         />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {recs.map((r, i) => (
-            <div key={i} className="rounded-lg border border-border bg-card p-5">
-              <div className="flex items-start justify-between mb-3">
-                <span className="eyebrow text-gold">{CLUSTER_LABELS[String(r.entity.meta?.cluster ?? "")] ?? r.entity.meta?.cluster}</span>
-                <span className="font-mono text-[10px] tabular text-gold">{Math.round(r.weight * 100)}%</span>
-              </div>
-              <div className="font-display text-xl leading-tight">{r.entity.name}</div>
-              <div className="font-mono text-[11px] text-muted-foreground mt-1">
-                {String(r.entity.meta?.region ?? "")}
-              </div>
-              <p className="mt-4 text-sm text-muted-foreground leading-relaxed">{r.reason}</p>
+        {!atlasConfigured && !pathsQuery.isLoading ? (
+          <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths-unconfigured">
+            <Route size={20} className="mx-auto text-muted-foreground mb-2" />
+            <div className="text-sm text-muted-foreground">Atlas isn't wired up yet.</div>
+            <div className="text-xs text-muted-foreground/70 mt-1">Set ATLAS_BASE_URL, ATLAS_FEED_TOKEN, and ATLAS_USER_ID in Life OS env to surface your logged paths here.</div>
+          </div>
+        ) : pathsQuery.isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-border bg-card/40 p-5 h-32 animate-pulse" />
+            ))}
+          </div>
+        ) : atlasPaths.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths">
+            <Route size={20} className="mx-auto text-muted-foreground mb-2" />
+            <div className="text-sm text-muted-foreground">No paths logged in Atlas yet.</div>
+            {pathsQuery.data?.atlasBaseUrl && (
+              <a href={pathsQuery.data.atlasBaseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-teal hover:underline mt-3" data-testid="link-open-atlas">
+                Open Atlas <ExternalLink size={11} />
+              </a>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {atlasPaths.slice(0, 12).map((p) => (
+                <div
+                  key={p.id}
+                  className="rounded-lg border border-border bg-card p-5"
+                  data-testid={`card-atlas-path-${p.id}`}
+                >
+                  <div className="flex items-start justify-between mb-3 gap-3">
+                    <span className="eyebrow text-gold uppercase tracking-wider">{p.type}</span>
+                    {p.date && (
+                      <span className="font-mono text-[10px] tabular text-muted-foreground">
+                        {new Date(p.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-display text-xl leading-tight">{p.name}</div>
+                      {p.location && (
+                        <div className="font-mono text-[11px] text-muted-foreground mt-1 truncate">
+                          {p.location}
+                        </div>
+                      )}
+                    </div>
+                    {p.atlasShareUrl && (
+                      <a
+                        href={p.atlasShareUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                        data-testid={`link-atlas-share-${p.id}`}
+                        aria-label="View on Atlas"
+                      >
+                        <ExternalLink size={13} />
+                      </a>
+                    )}
+                  </div>
+                  {p.note && (
+                    <p className="mt-4 text-sm text-muted-foreground leading-relaxed line-clamp-3">{p.note}</p>
+                  )}
+                  {(p.weatherLabel || p.weatherTemp != null || p.moonPhase != null) && (
+                    <div className="mt-4 flex items-center flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {p.weatherLabel && (
+                        <span className="inline-flex items-center gap-1">
+                          <Thermometer size={11} />
+                          {p.weatherLabel}{p.weatherTemp != null ? ` · ${Math.round(p.weatherTemp)}°` : ""}
+                        </span>
+                      )}
+                      {p.moonPhase != null && (
+                        <span className="inline-flex items-center gap-1">
+                          <Moon size={11} />
+                          {(p.moonPhase * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+            {pathsQuery.data?.atlasBaseUrl && (
+              <div className="mt-4 text-right">
+                <a
+                  href={pathsQuery.data.atlasBaseUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                  data-testid="link-open-atlas-all"
+                >
+                  See all on Atlas <ExternalLink size={11} />
+                </a>
+              </div>
+            )}
+          </>
+        )}
       </section>
     </div>
   );

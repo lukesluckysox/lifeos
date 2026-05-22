@@ -10,6 +10,7 @@ import * as Plaid from "./plaid";
 import { seedCatalog, type CatalogItem } from "./catalog-seed";
 import { seedEvents, type SeedEvent } from "./events-seed";
 import { requireAuth, optionalAuth, setSessionCookie, clearSessionCookie } from "./auth";
+import { fetchAtlasPaths, atlasShareUrl, atlasConfigured, atlasBaseUrl } from "./atlas";
 import { randomUUID } from "node:crypto";
 
 const TMDB_KEY = process.env.TMDB_API_KEY;
@@ -746,6 +747,31 @@ export async function registerRoutes(
       const r = await storage.removeUserItem(req.user!.id, id);
       res.json(r);
     } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Atlas paths — read-only mirror of paths logged in the sibling app
+  // ══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/paths", requireAuth, async (req, res) => {
+    try {
+      const force = req.query.refresh === "1";
+      const { paths, source } = await fetchAtlasPaths({ force });
+      // Attach share URLs server-side so the client doesn't need to know
+      // Atlas's base URL.
+      const withShare = paths.map((p) => ({
+        ...p,
+        atlasShareUrl: atlasShareUrl(p.shareSlug),
+      }));
+      res.json({
+        paths: withShare,
+        source,
+        configured: atlasConfigured(),
+        atlasBaseUrl: atlasConfigured() ? atlasBaseUrl() : null,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message, paths: [], source: "error" });
+    }
   });
 
   // ══════════════════════════════════════════════════════════════════════════
