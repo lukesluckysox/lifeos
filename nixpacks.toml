@@ -6,18 +6,16 @@
 nixPkgs = ["nodejs_20", "npm-9_x"]
 
 [phases.install]
-# rm -rf the npm/.cache dir before install to dodge Railway's EBUSY on rmdir
-# when the build daemon tries to clean a previously cached layer.
-cmds = [
-  "rm -rf node_modules/.cache /root/.npm/_cacache || true",
-  "npm ci --no-audit --no-fund --prefer-offline"
-]
+# Use `npm install --include=dev` instead of `npm ci`.
+# `npm ci` tries to wipe node_modules first, which fails with EBUSY
+# on Railway because /app/node_modules/.cache is a mounted volume
+# the kernel won't let us rmdir. `npm install` reconciles in place
+# without wiping, and --include=dev forces devDependencies even when
+# NODE_ENV=production (Railway sets this during build).
+cmds = ["npm install --no-audit --no-fund --include=dev"]
 
 [phases.build]
-cmds = [
-  "rm -rf node_modules/.cache || true",
-  "npm run build"
-]
+cmds = ["npm run build"]
 
 [start]
 cmd = "node dist/index.cjs"
