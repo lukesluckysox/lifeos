@@ -2,7 +2,7 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm ci && npm run build"
+    "buildCommand": "rm -rf node_modules/.cache /root/.npm/_cacache || true && npm ci --no-audit --no-fund --prefer-offline && rm -rf node_modules/.cache || true && npm run build"
   },
   "deploy": {
     "startCommand": "node dist/index.cjs",

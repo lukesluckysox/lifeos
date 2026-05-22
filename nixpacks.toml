@@ -6,10 +6,18 @@
 nixPkgs = ["nodejs_20", "npm-9_x"]
 
 [phases.install]
-cmds = ["npm ci"]
+# rm -rf the npm/.cache dir before install to dodge Railway's EBUSY on rmdir
+# when the build daemon tries to clean a previously cached layer.
+cmds = [
+  "rm -rf node_modules/.cache /root/.npm/_cacache || true",
+  "npm ci --no-audit --no-fund --prefer-offline"
+]
 
 [phases.build]
-cmds = ["npm run build"]
+cmds = [
+  "rm -rf node_modules/.cache || true",
+  "npm run build"
+]
 
 [start]
 cmd = "node dist/index.cjs"
