@@ -28,10 +28,12 @@ function getClient(): PlaidApi {
     throw new PlaidNotConfiguredError();
   }
 
+  // Plaid SDK v36+ removed the legacy `development` environment. We map it
+  // to `production` (real banks) and continue — sandbox stays the default.
   const baseUrl =
-    env === "production" ? PlaidEnvironments.production :
-    env === "development" ? PlaidEnvironments.development :
-    PlaidEnvironments.sandbox;
+    env === "production" || env === "development"
+      ? PlaidEnvironments.production
+      : PlaidEnvironments.sandbox;
 
   const config = new Configuration({
     basePath: baseUrl,

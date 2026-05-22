@@ -1,0 +1,15 @@
+# Force Nixpacks to use Node 20 — several deps (Vite 7, Tailwind oxide,
+# Supabase, Plaid 42) require Node >=20. Without this Railway picks Node 18
+# and the build fails with EBADENGINE warnings + npm ci errors.
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm-9_x"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "node dist/index.cjs"

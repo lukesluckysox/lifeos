@@ -1423,6 +1423,168 @@ export async function registerRoutes(
   });
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Chart history (for ETF tiles + click-to-chart)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  interface ChartHistory {
+    symbol: string;
+    currentPrice: number | null;
+    returnPct: number | null;
+    ytdReturnPct: number | null;
+    closes: number[]; // downsampled, max 60 points
+    weeks: number;
+  }
+
+  const chartCache = new Map<string, { data: ChartHistory; expiresAt: number }>();
+  const CHART_TTL = 5 * 60 * 1000;
+
+  function downsample(arr: number[], maxPoints = 60): number[] {
+    if (arr.length <= maxPoints) return arr;
+    const step = arr.length / maxPoints;
+    const out: number[] = [];
+    for (let i = 0; i < maxPoints; i++) out.push(arr[Math.floor(i * step)]);
+    out.push(arr[arr.length - 1]);
+    return out;
+  }
+
+  async function fetchChartHistory(symbol: string, weeks: number): Promise<ChartHistory> {
+    const cacheKey = `${symbol}:${weeks}`;
+    const cached = chartCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) return cached.data;
+
+    try {
+      // Always fetch 1y so we can derive YTD locally
+      const r = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d`,
+        { headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      if (!r.ok) throw new Error(`Yahoo ${r.status}`);
+      const data = await r.json();
+      const result = data?.chart?.result?.[0];
+      if (!result) throw new Error("no result");
+      const meta = result.meta;
+      const tsArr: number[] = result.timestamp ?? [];
+      const closesAll: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+
+      // pair (ts, close) and drop nulls
+      const pairs: { t: number; c: number }[] = [];
+      for (let i = 0; i < tsArr.length; i++) {
+        const c = closesAll[i];
+        if (c != null) pairs.push({ t: tsArr[i], c });
+      }
+      if (!pairs.length) throw new Error("no closes");
+
+      const last = meta.regularMarketPrice ?? pairs[pairs.length - 1].c;
+
+      // Slice to active lookback window (from end)
+      const tradingDays = Math.max(5, Math.round(weeks * 5));
+      const sliced = pairs.slice(Math.max(0, pairs.length - tradingDays));
+      const firstClose = sliced[0].c;
+      const returnPct = firstClose > 0 ? ((last - firstClose) / firstClose) * 100 : 0;
+
+      // YTD: find first pair on or after Jan 1 of current year
+      const ytdStart = new Date(new Date().getUTCFullYear(), 0, 1).getTime() / 1000;
+      const ytdAnchor = pairs.find((p) => p.t >= ytdStart) ?? pairs[0];
+      const ytdReturnPct = ytdAnchor.c > 0 ? ((last - ytdAnchor.c) / ytdAnchor.c) * 100 : 0;
+
+      const out: ChartHistory = {
+        symbol,
+        currentPrice: last,
+        returnPct,
+        ytdReturnPct,
+        closes: downsample(sliced.map((p) => p.c)),
+        weeks,
+      };
+      chartCache.set(cacheKey, { data: out, expiresAt: Date.now() + CHART_TTL });
+      return out;
+    } catch {
+      return {
+        symbol,
+        currentPrice: null,
+        returnPct: null,
+        ytdReturnPct: null,
+        closes: [],
+        weeks,
+      };
+    }
+  }
+
+  app.get("/api/chart-history/:symbol", async (req, res) => {
+    const symbol = req.params.symbol.toUpperCase();
+    const weeks = Math.max(1, Math.min(52, parseInt((req.query.weeks as string) || "13", 10) || 13));
+    try {
+      const out = await fetchChartHistory(symbol, weeks);
+      res.json(out);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/chart-history/batch", async (req, res) => {
+    const { symbols, weeks: rawWeeks } = req.body || {};
+    if (!Array.isArray(symbols)) return res.status(400).json({ message: "symbols array required" });
+    const weeks = Math.max(1, Math.min(52, parseInt(String(rawWeeks || 13), 10) || 13));
+    const uniq = Array.from(new Set((symbols as string[]).map((s) => String(s).toUpperCase()).filter(Boolean)));
+    const results = await Promise.all(
+      uniq.map((sym) => fetchChartHistory(sym, weeks).catch(() => null))
+    );
+    res.json(results.filter(Boolean));
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Category leaders (sector trophy cards)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // Curated universe — symbol → sector. Kept tight on purpose so each batch
+  // is fast and cache-friendly.
+  const SECTOR_UNIVERSE: Record<string, string[]> = {
+    "Tech":       ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA", "AMD", "ORCL", "CRM"],
+    "Finance":    ["JPM", "BAC", "WFC", "GS", "MS", "BLK", "SCHW", "V", "MA", "AXP"],
+    "Healthcare": ["LLY", "UNH", "JNJ", "ABBV", "PFE", "MRK", "TMO", "ABT", "DHR", "ISRG"],
+    "Consumer":   ["WMT", "COST", "HD", "NKE", "MCD", "SBUX", "PG", "KO", "PEP", "DIS"],
+    "Energy":     ["XOM", "CVX", "COP", "SLB", "EOG", "OXY", "PSX", "MPC", "VLO", "HES"],
+    "Crypto":     ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "LINK", "DOT", "MATIC"],
+  };
+
+  // Crypto symbols on Yahoo Finance are quoted as `<TICKER>-USD`
+  function yahooSymbol(sym: string, sector: string): string {
+    if (sector === "Crypto") return `${sym}-USD`;
+    return sym;
+  }
+
+  app.post("/api/sector-leaders", async (req, res) => {
+    const { weeks: rawWeeks } = req.body || {};
+    const weeks = Math.max(1, Math.min(52, parseInt(String(rawWeeks || 13), 10) || 13));
+
+    try {
+      const sectors = await Promise.all(
+        Object.entries(SECTOR_UNIVERSE).map(async ([name, symbols]) => {
+          const rows = await Promise.all(
+            symbols.map(async (s) => {
+              const yhSym = yahooSymbol(s, name);
+              const r = await fetchSentiment(yhSym, weeks).catch(() => null);
+              if (!r) return null;
+              return { symbol: s, displaySymbol: s, returnPct: r.returnPct, sentiment: r.sentiment, currentPrice: r.currentPrice };
+            })
+          );
+          const sorted = (rows.filter(Boolean) as { symbol: string; displaySymbol: string; returnPct: number | null; sentiment: number; currentPrice: number | null }[])
+            .filter((x) => x.returnPct != null)
+            .sort((a, b) => (b.returnPct ?? 0) - (a.returnPct ?? 0));
+          const leader = sorted[0] ?? null;
+          return {
+            name,
+            leader,
+            top10: sorted.slice(0, 10),
+          };
+        })
+      );
+      res.json({ sectors, weeks });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Rec feedback
   // ══════════════════════════════════════════════════════════════════════════
 

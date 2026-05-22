@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useLookback } from "@/components/LookbackContext";
-import { LookbackPills } from "@/components/LookbackPills";
 
 /* ---------- Types ---------- */
 
@@ -125,8 +124,8 @@ export function SentimentEngine({ holdings }: Props) {
       {/* Header row */}
       <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-0 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="eyebrow">MARKET SENTIMENT</div>
-          <LookbackPills />
+          <div className="eyebrow">Market sentiment</div>
+          <span className="font-mono text-[10px] text-muted-foreground/70">{label}</span>
         </div>
       </div>
 

@@ -13,7 +13,11 @@ import { PillTabs } from "@/components/PillTabs";
 import { useTabParam } from "@/hooks/useTabParam";
 import Subscriptions from "@/pages/Subscriptions";
 import { LookbackProvider } from "@/components/LookbackContext";
+import { LookbackPills } from "@/components/LookbackPills";
 import { SentimentEngine } from "@/components/SentimentEngine";
+import { OptimalAllocation } from "@/components/OptimalAllocation";
+import { ETFTiles } from "@/components/ETFTiles";
+import { CategoryLeaders } from "@/components/CategoryLeaders";
 
 /* ---------- Types ---------- */
 
@@ -156,6 +160,12 @@ function FinanceMain() {
     ...manualHoldings.map(h => ({ symbol: h.symbol })),
   ];
 
+  // Holdings with dollar value — used by OptimalAllocation for weighting
+  const valuedHoldings = [
+    ...plaidHoldings.map(h => ({ symbol: h.ticker, value: h.value, name: h.name })),
+    ...manualHoldings.map(h => ({ symbol: h.symbol, value: h.value, name: h.name })),
+  ];
+
   return (
     <LookbackProvider>
     <div className="space-y-16 animate-fade-in">
@@ -190,12 +200,27 @@ function FinanceMain() {
             <Metric label="Lifetime" value={totalCost ? `${blendedGainPct >= 0 ? "+" : ""}${blendedGainPct.toFixed(1)}%` : "—"} sub="blended" />
           </div>
         </div>
+
+        {/* Global lookback — every metric below recalculates against this window */}
+        <div className="mt-6 flex items-center gap-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Lookback</div>
+          <LookbackPills />
+        </div>
       </section>
 
       <div className="hairline" />
 
       {/* ============ Sentiment engine ============ */}
       <SentimentEngine holdings={sentimentHoldings} />
+
+      {/* ============ Optimal allocation + what-if ============ */}
+      <OptimalAllocation holdings={valuedHoldings} />
+
+      {/* ============ ETF tiles ============ */}
+      <ETFTiles />
+
+      {/* ============ Category leaders ============ */}
+      <CategoryLeaders />
 
       {/* ============ Plaid brokerage connect ============ */}
       {mode !== "demo" && <PlaidConnect />}
