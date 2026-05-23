@@ -169,28 +169,76 @@ export async function getTopTracks(userId: number, timeRange: "short_term" | "me
 }
 
 export async function getFollowedArtists(userId: number, limit = 50): Promise<Array<{ id: string; name: string; url?: string; image?: string }>> {
-  const data: any = await userApi(userId, "/me/following", { type: "artist", limit });
-  return (data.artists?.items || []).map((a: any) => ({
-    id: a.id,
-    name: a.name,
-    url: a.external_urls?.spotify,
-    image: a.images?.[1]?.url || a.images?.[0]?.url,
-  }));
+  // Spotify caps /me/following at 50 per page and uses cursor pagination.
+  // Page through until we hit the requested limit or run out.
+  const acc: Array<{ id: string; name: string; url?: string; image?: string }> = [];
+  let after: string | undefined;
+  while (acc.length < limit) {
+    const pageSize = Math.min(50, limit - acc.length);
+    const params: Record<string, any> = { type: "artist", limit: pageSize };
+    if (after) params.after = after;
+    const data: any = await userApi(userId, "/me/following", params);
+    const items = data.artists?.items || [];
+    if (items.length === 0) break;
+    for (const a of items) {
+      acc.push({
+        id: a.id,
+        name: a.name,
+        url: a.external_urls?.spotify,
+        image: a.images?.[1]?.url || a.images?.[0]?.url,
+      });
+    }
+    after = data.artists?.cursors?.after;
+    if (!after) break;
+  }
+  return acc;
+}
+
+/**
+ * Followed artists, paginated, with each artist's full Spotify genre tags.
+ * /me/following already returns the genres array on each artist, so we
+ * don't need a second batch fetch.
+ */
+async function getAllFollowedArtistsWithMeta(userId: number, cap = 200): Promise<ArtistMeta[]> {
+  const acc: ArtistMeta[] = [];
+  let after: string | undefined;
+  while (acc.length < cap) {
+    const pageSize = Math.min(50, cap - acc.length);
+    const params: Record<string, any> = { type: "artist", limit: pageSize };
+    if (after) params.after = after;
+    const data: any = await userApi(userId, "/me/following", params);
+    const items = data.artists?.items || [];
+    if (items.length === 0) break;
+    for (const a of items) {
+      acc.push({
+        id: a.id,
+        name: a.name,
+        url: a.external_urls?.spotify,
+        image: a.images?.[1]?.url || a.images?.[0]?.url,
+        genres: Array.isArray(a.genres) ? a.genres : [],
+      });
+    }
+    after = data.artists?.cursors?.after;
+    if (!after) break;
+  }
+  return acc;
 }
 
 export async function getNewReleasesFromFollowed(userId: number, opts: { limit?: number; daysBack?: number } = {}) {
   const limit = opts.limit ?? 20;
-  const daysBack = opts.daysBack ?? 60;
+  const daysBack = opts.daysBack ?? 90;
   const cutoff = Date.now() - daysBack * 86400000;
-  const artists = await getFollowedArtists(userId, 50);
-  const subset = artists.slice(0, 20);
+  const horizon = Date.now() + 180 * 86400000; // include pre-saves up to 6 months out
+  // Scan a wider artist roster — not just the first 20 — so users with
+  // 30+ followed artists actually see their stuff in the section.
+  const artists = await getFollowedArtists(userId, 60);
   const all: any[] = [];
-  for (const a of subset) {
+  for (const a of artists) {
     try {
       const data: any = await userApi(userId, `/artists/${a.id}/albums`, { include_groups: "album,single", limit: 5, market: "US" });
       for (const al of (data.items || [])) {
         const ts = Date.parse(al.release_date || "");
-        if (Number.isFinite(ts) && ts >= cutoff) {
+        if (Number.isFinite(ts) && ts >= cutoff && ts <= horizon) {
           all.push({
             id: al.id,
             name: al.name,
@@ -200,6 +248,7 @@ export async function getNewReleasesFromFollowed(userId: number, opts: { limit?:
             releaseDate: al.release_date,
             albumType: al.album_type,
             url: al.external_urls?.spotify,
+            isUpcoming: ts > Date.now(),
           });
         }
       }
@@ -263,20 +312,24 @@ async function getArtistsMetadata(userId: number, ids: string[]): Promise<Map<st
  * (e.g. "trap soul" → Hip-hop, not R&B).
  */
 const GENRE_RULES: Array<[RegExp, string]> = [
-  [/reggae|dub\b|dancehall|ska\b|roots/, "Reggae"],
-  [/hip hop|hip-hop|hiphop|\brap\b|trap|drill|grime|phonk|boom bap/, "Hip-hop"],
-  [/r&b|rnb|soul|neo soul|neo-soul|funk/, "R&B / Soul"],
-  [/edm|house|techno|trance|drum and bass|dnb|dubstep|electro|bass|tropical|garage|breakbeat|hardstyle|future bass|dance pop/, "Electronic"],
-  [/lo-fi|lofi|chillhop|chillwave|ambient|downtempo|chill\b/, "Ambient / Lo-fi"],
-  [/indie|shoegaze|dream pop|bedroom|jangle/, "Indie"],
-  [/punk|grunge|metal|emo|post-hardcore|hardcore|metalcore/, "Rock"],
-  [/\brock\b|alternative/, "Rock"],
-  [/folk|americana|country|bluegrass|singer-songwriter/, "Folk / Country"],
-  [/jazz|bebop|swing|bossa|fusion/, "Jazz"],
-  [/classical|orchestra|baroque|romantic|opera|symphony|piano/, "Classical"],
-  [/latin|reggaeton|salsa|cumbia|bachata|mariachi|bossa nova/, "Latin"],
-  [/afrobeat|amapiano|highlife|k-pop|j-pop|c-pop|bollywood|world/, "World"],
-  [/\bpop\b/, "Pop"], // last so it doesn't swallow dream pop / indie pop / dance pop
+  [/reggae|dub\b|dancehall|ska\b|roots|riddim/, "Reggae"],
+  [/hip hop|hip-hop|hiphop|\brap\b|trap|drill|grime|phonk|boom bap|conscious|gangster|crunk|cloud rap/, "Hip-hop"],
+  [/r&b|rnb|soul|neo soul|neo-soul|funk|motown|quiet storm|new jack/, "R&B / Soul"],
+  [/edm|house|techno|trance|drum and bass|dnb|dubstep|electro|bass|tropical|garage|breakbeat|hardstyle|future bass|dance pop|big room|tech house|deep house|melodic|psytrance|riddim dubstep|complextro|moombahton/, "Electronic"],
+  [/lo-fi|lofi|chillhop|chillwave|ambient|downtempo|\bchill\b|new age|drone/, "Ambient / Lo-fi"],
+  [/indie|shoegaze|dream pop|bedroom|jangle|slacker|twee/, "Indie"],
+  [/punk|grunge|metal|emo|post-hardcore|hardcore|metalcore|nu metal|screamo|stoner/, "Rock"],
+  [/\brock\b|alternative|garage rock|psychedelic|prog/, "Rock"],
+  [/folk|americana|country|bluegrass|singer-songwriter|bluesy|outlaw/, "Folk / Country"],
+  [/jazz|bebop|swing|bossa|fusion|big band|smooth jazz/, "Jazz"],
+  [/blues|delta|chicago blues|rhythm and blues/, "Blues"],
+  [/classical|orchestra|baroque|romantic|opera|symphony|piano|chamber|cello|violin/, "Classical"],
+  [/latin|reggaeton|salsa|cumbia|bachata|mariachi|bossa nova|tejano|merengue|trap latino/, "Latin"],
+  [/afrobeat|amapiano|highlife|k-pop|j-pop|c-pop|bollywood|world|afropop|afro|gqom|mande|raï/, "World"],
+  [/christian|gospel|worship|ccm/, "Gospel / Christian"],
+  [/\bedm\b|disco|nu-disco|electro pop|synthpop|synthwave|vaporwave/, "Electronic"],
+  [/soundtrack|score|film|video game|musical/, "Soundtrack"],
+  [/\bpop\b|adult standards|easy listening/, "Pop"], // last so it doesn't swallow dream pop / indie pop / dance pop
 ];
 
 function bucketGenreOne(raw: string): string | null {
@@ -286,7 +339,9 @@ function bucketGenreOne(raw: string): string | null {
 }
 
 function bucketGenre(raw: string): string {
-  return bucketGenreOne(raw) ?? raw.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  // Unmapped genres collapse to a single "Other" bucket instead of
+  // becoming their own one-artist orphan label.
+  return bucketGenreOne(raw) ?? "Other";
 }
 
 /**
@@ -301,8 +356,9 @@ function bucketGenres(rawGenres: string[]): string {
     const hit = bucketGenreOne(g);
     if (hit) return hit;
   }
-  if (rawGenres.length === 0) return "Unknown";
-  return rawGenres[0].toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  // No artist genres, or none matched a parent bucket: collapse to a
+  // shared "Other" bucket rather than minting per-artist labels.
+  return "Other";
 }
 
 export interface GenreBucket {
@@ -369,7 +425,9 @@ async function rollupByGenre(
   }
 
   return Array.from(buckets.values())
-    .filter(b => b.genre !== "Unknown" || buckets.size === 1)
+    // Hide "Other" if it's a tiny tail; only show it when it's meaningful (>=2 plays)
+    // or there's literally nothing else to render.
+    .filter(b => b.genre !== "Other" || b.count >= 2 || buckets.size === 1)
     .sort((a, b) => b.count - a.count)
     .slice(0, topN);
 }
@@ -377,7 +435,7 @@ async function rollupByGenre(
 /** Recently played → rolled up by genre (replaces per-track recent list). */
 export async function getRecentByGenre(userId: number, limit = 50) {
   const data: any = await userApi(userId, "/me/player/recently-played", { limit });
-  const tracks = (data.items || []).map((it: any) => ({
+  const raw = (data.items || []).map((it: any) => ({
     id: it.track.id,
     name: it.track.name,
     artists: (it.track.artists || []).map((a: any) => ({ id: a.id, name: a.name })),
@@ -385,6 +443,16 @@ export async function getRecentByGenre(userId: number, limit = 50) {
     url: it.track.external_urls?.spotify,
     playedAt: it.played_at,
   }));
+  // Dedupe by track id so 5 plays of one song don't inflate its genre bucket;
+  // keep the most recent playedAt for each unique track.
+  const dedupMap = new Map<string, typeof raw[number]>();
+  for (const t of raw) {
+    const prev = dedupMap.get(t.id);
+    if (!prev || (t.playedAt && (!prev.playedAt || t.playedAt > prev.playedAt))) {
+      dedupMap.set(t.id, t);
+    }
+  }
+  const tracks = Array.from(dedupMap.values());
   const genres = await rollupByGenre(userId, tracks, 6);
   return { source: "spotify-recent-by-genre", genres, asOf: new Date().toISOString() };
 }
@@ -406,20 +474,18 @@ export async function getRotationByGenre(userId: number, limit = 50) {
 /**
  * Followed artists with their genres + image, sized for a left-rail list.
  */
-export async function getFollowedArtistsWithGenres(userId: number, limit = 20) {
-  const data: any = await userApi(userId, "/me/following", { type: "artist", limit });
-  const artists: ArtistMeta[] = (data.artists?.items || []).map((a: any) => ({
-    id: a.id,
-    name: a.name,
-    url: a.external_urls?.spotify,
-    image: a.images?.[1]?.url || a.images?.[0]?.url,
-    genres: Array.isArray(a.genres) ? a.genres : [],
-  }));
+export async function getFollowedArtistsWithGenres(userId: number, limit = 200) {
+  // Page through ALL followed artists (capped at `limit`, default 200).
+  // The UI scrolls within a fixed-height list so a longer roster doesn't
+  // blow out the page.
+  const artists = await getAllFollowedArtistsWithMeta(userId, limit);
   return {
     source: "spotify-followed-artists",
     artists: artists.map(a => ({
       ...a,
-      primaryGenre: a.genres[0] ? bucketGenre(a.genres[0]) : undefined,
+      // Use bucketGenres (the smart fallback) over a single genre lookup so
+      // "australian indie rock" rolls up to "Indie" rather than "Other".
+      primaryGenre: bucketGenres(a.genres),
     })),
     asOf: new Date().toISOString(),
   };
@@ -431,11 +497,13 @@ export async function getFollowedArtistsWithGenres(userId: number, limit = 20) {
  * and surfaced as "scheduled upcoming".
  */
 export async function getUpcomingReleases(userId: number, opts: { limit?: number; daysBack?: number } = {}) {
+  // Kept name for backward compat with the route. Now surfaces a wider
+  // "New & Upcoming" window: past 90 days through any future pre-saves.
   const res = await getNewReleasesFromFollowed(userId, {
-    limit: opts.limit ?? 12,
-    daysBack: opts.daysBack ?? 30,
+    limit: opts.limit ?? 16,
+    daysBack: opts.daysBack ?? 90,
   });
-  return { ...res, source: "spotify-upcoming-releases" };
+  return { ...res, source: "spotify-new-releases" };
 }
 
 // ── Legacy app-level helpers (kept for backward compat within routes that don't have userId) ──

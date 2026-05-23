@@ -45,6 +45,7 @@ interface Release {
   releaseDate?: string;
   albumType?: string;
   url?: string;
+  isUpcoming?: boolean;
 }
 
 interface ReleasesResp {
@@ -228,7 +229,17 @@ function ReleaseRow({ release }: { release: Release }) {
         </div>
       )}
       <div className="flex-1 min-w-0">
-        <div className="font-display text-sm leading-tight truncate">{release.name}</div>
+        <div className="font-display text-sm leading-tight truncate flex items-center gap-2">
+          <span className="truncate">{release.name}</span>
+          {release.isUpcoming && (
+            <span
+              className="shrink-0 text-[9px] font-mono uppercase tracking-wider text-teal bg-teal/10 border border-teal/30 rounded px-1.5 py-0.5"
+              data-testid={`badge-upcoming-${release.id}`}
+            >
+              Upcoming
+            </span>
+          )}
+        </div>
         <div className="text-[11px] text-muted-foreground truncate mt-0.5">
           {release.artist}
           {release.albumType && (
@@ -280,7 +291,7 @@ function UnauthorizedHint() {
     >
       <div>
         <div className="text-sm font-medium">Connect Spotify to see your music.</div>
-        <div className="text-xs text-muted-foreground mt-0.5">Read-only. We pull your top artists, recent plays, and upcoming releases.</div>
+        <div className="text-xs text-muted-foreground mt-0.5">Read-only. We pull your followed artists, recent plays, and new releases.</div>
       </div>
       <a
         href="/api/auth/spotify/login"
@@ -348,7 +359,7 @@ export default function Music() {
               Your taste, in one place.
             </h1>
             <p className="mt-3 text-sm text-muted-foreground max-w-xl leading-relaxed">
-              Recent plays rolled up by genre, your followed artists, and new releases worth your time.
+              Your followed artists, what just dropped, and the genres in your rotation.
             </p>
           </div>
           <button
@@ -395,25 +406,25 @@ export default function Music() {
           </div>
         </div>
 
-        {/* Upcoming releases */}
-        <div data-testid="section-upcoming-releases">
+        {/* New releases (past 90 days + any pre-saves) */}
+        <div data-testid="section-new-releases">
           <div className="flex items-baseline justify-between gap-3 mb-3 px-1">
             <div>
               <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
                 <CalendarClock size={10} className="inline mr-1 -mt-px" />
-                Scheduled / recent
+                From artists you follow
               </div>
-              <h2 className="font-display text-lg leading-tight mt-1">Upcoming releases</h2>
+              <h2 className="font-display text-lg leading-tight mt-1">New releases</h2>
             </div>
             <span className="font-mono text-[10px] text-muted-foreground tabular shrink-0">
-              last 30 days
+              last 90 days
             </span>
           </div>
           <div className="rounded-lg border border-border bg-card/40 p-1.5 max-h-[420px] overflow-y-auto">
             {upcoming.isLoading ? (
               <SidebarSkeleton />
             ) : (upcoming.data?.tracks ?? []).length === 0 ? (
-              <EmptyHint message="No new releases from your followed artists in the last 30 days." />
+              <EmptyHint message="Nothing new from your followed artists in the last 90 days." />
             ) : (
               <div className="space-y-0.5">
                 {upcoming.data!.tracks!.map((r) => (
