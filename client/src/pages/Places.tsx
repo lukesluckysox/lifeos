@@ -1,5 +1,7 @@
-import { MapPin, Compass, Route, Calendar, Sparkles, ExternalLink, Moon, Thermometer } from "lucide-react";
+import { MapPin, Compass, Route, Calendar, Sparkles, ExternalLink, Moon, Thermometer, ChevronLeft, ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useState, useMemo } from "react";
+import { PathsMap, typeColor, typeLabel } from "@/components/PathsMap";
 import { SectionHeader } from "@/components/SectionHeader";
 import { AddItem } from "@/components/AddItem";
 import { RecFeedback } from "@/components/RecFeedback";
@@ -448,122 +450,12 @@ function PlacesMain() {
       </section>
 
       {/* Atlas paths — real places logged in the sibling app */}
-      <section>
-        <SectionHeader
-          eyebrow="Paths"
-          title="Places you've logged in Atlas"
-          description="Pulled live from your Atlas paths — most recent first."
-        />
-        {!atlasConfigured && !pathsQuery.isLoading ? (
-          <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths-unconfigured">
-            <Route size={20} className="mx-auto text-muted-foreground mb-2" />
-            <div className="text-sm text-muted-foreground">Connect Atlas to see places you've walked.</div>
-            <div className="text-xs text-muted-foreground/70 mt-1 max-w-sm mx-auto">
-              Atlas is the sibling app that logs the routes you actually take. Once it's linked, your real-world paths show up here.
-            </div>
-            <a
-              href="https://traces.up.railway.app"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-teal hover:underline mt-4 font-mono uppercase tracking-wider"
-              data-testid="link-open-atlas-empty"
-            >
-              Open Atlas <ExternalLink size={11} />
-            </a>
-          </div>
-        ) : pathsQuery.isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-lg border border-border bg-card/40 p-5 h-32 animate-pulse" />
-            ))}
-          </div>
-        ) : atlasPaths.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths">
-            <Route size={20} className="mx-auto text-muted-foreground mb-2" />
-            <div className="text-sm text-muted-foreground">No paths logged in Atlas yet.</div>
-            {pathsQuery.data?.atlasBaseUrl && (
-              <a href={pathsQuery.data.atlasBaseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-teal hover:underline mt-3" data-testid="link-open-atlas">
-                Open Atlas <ExternalLink size={11} />
-              </a>
-            )}
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {atlasPaths.slice(0, 12).map((p) => (
-                <div
-                  key={p.id}
-                  className="rounded-lg border border-border bg-card p-5"
-                  data-testid={`card-atlas-path-${p.id}`}
-                >
-                  <div className="flex items-start justify-between mb-3 gap-3">
-                    <span className="eyebrow text-gold uppercase tracking-wider">{p.type}</span>
-                    {p.date && (
-                      <span className="font-mono text-[10px] tabular text-muted-foreground">
-                        {new Date(p.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-display text-xl leading-tight">{p.name}</div>
-                      {p.location && (
-                        <div className="font-mono text-[11px] text-muted-foreground mt-1 truncate">
-                          {p.location}
-                        </div>
-                      )}
-                    </div>
-                    {p.atlasShareUrl && (
-                      <a
-                        href={p.atlasShareUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                        data-testid={`link-atlas-share-${p.id}`}
-                        aria-label="View on Atlas"
-                      >
-                        <ExternalLink size={13} />
-                      </a>
-                    )}
-                  </div>
-                  {p.note && (
-                    <p className="mt-4 text-sm text-muted-foreground leading-relaxed line-clamp-3">{p.note}</p>
-                  )}
-                  {(p.weatherLabel || p.weatherTemp != null || p.moonPhase != null) && (
-                    <div className="mt-4 flex items-center flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {p.weatherLabel && (
-                        <span className="inline-flex items-center gap-1">
-                          <Thermometer size={11} />
-                          {p.weatherLabel}{p.weatherTemp != null ? ` · ${Math.round(p.weatherTemp)}°` : ""}
-                        </span>
-                      )}
-                      {p.moonPhase != null && (
-                        <span className="inline-flex items-center gap-1">
-                          <Moon size={11} />
-                          {(p.moonPhase * 100).toFixed(0)}%
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {pathsQuery.data?.atlasBaseUrl && (
-              <div className="mt-4 text-right">
-                <a
-                  href={pathsQuery.data.atlasBaseUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-                  data-testid="link-open-atlas-all"
-                >
-                  See all on Atlas <ExternalLink size={11} />
-                </a>
-              </div>
-            )}
-          </>
-        )}
-      </section>
+      <AtlasPathsSection
+        paths={atlasPaths}
+        configured={atlasConfigured}
+        isLoading={pathsQuery.isLoading}
+        atlasBaseUrl={pathsQuery.data?.atlasBaseUrl}
+      />
     </div>
   );
 }
@@ -587,5 +479,268 @@ export default function Places() {
       </div>
       {active === "places" ? <PlacesMain /> : <Food />}
     </div>
+  );
+}
+
+/* ============ Atlas paths — map + filter + pagination ============ */
+const PAGE_SIZE = 12;
+const ATLAS_FILTERS: { id: string; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "national_park", label: "National Parks" },
+  { id: "state", label: "States" },
+  { id: "country", label: "Countries" },
+  { id: "stadium", label: "Stadiums" },
+  { id: "concert", label: "Concerts" },
+  { id: "beach", label: "Beaches" },
+];
+
+function AtlasPathsSection({
+  paths,
+  configured,
+  isLoading,
+  atlasBaseUrl,
+}: {
+  paths: AtlasPath[];
+  configured: boolean;
+  isLoading: boolean;
+  atlasBaseUrl: string | null | undefined;
+}) {
+  const [filter, setFilter] = useState<string>("all");
+  const [page, setPage] = useState(0);
+
+  // Available filters = only those with data (plus "All")
+  const availableFilters = useMemo(() => {
+    const present = new Set(paths.map((p) => p.type));
+    return ATLAS_FILTERS.filter((f) => f.id === "all" || present.has(f.id));
+  }, [paths]);
+
+  const counts = useMemo(() => {
+    const m: Record<string, number> = { all: paths.length };
+    for (const p of paths) m[p.type] = (m[p.type] || 0) + 1;
+    return m;
+  }, [paths]);
+
+  const filtered = useMemo(() => {
+    if (filter === "all") return paths;
+    return paths.filter((p) => p.type === filter);
+  }, [paths, filter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageItems = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+  // ── empty / loading states ──────────────────────────────────────────
+  if (!configured && !isLoading) {
+    return (
+      <section>
+        <SectionHeader eyebrow="Paths" title="Places you've logged in Atlas" />
+        <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths-unconfigured">
+          <Route size={20} className="mx-auto text-muted-foreground mb-2" />
+          <div className="text-sm text-muted-foreground">Connect Atlas to see places you've walked.</div>
+          <div className="text-xs text-muted-foreground/70 mt-1 max-w-sm mx-auto">
+            Atlas is the sibling app that logs the routes you actually take. Once it's linked, your real-world paths show up here.
+          </div>
+          <a
+            href="https://traces.up.railway.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-teal hover:underline mt-4 font-mono uppercase tracking-wider"
+            data-testid="link-open-atlas-empty"
+          >
+            Open Atlas <ExternalLink size={11} />
+          </a>
+        </div>
+      </section>
+    );
+  }
+  if (isLoading) {
+    return (
+      <section>
+        <SectionHeader eyebrow="Paths" title="Places you've logged in Atlas" />
+        <div className="rounded-lg border border-border bg-card/40 h-[360px] animate-pulse mb-4" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-border bg-card/40 p-5 h-32 animate-pulse" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+  if (paths.length === 0) {
+    return (
+      <section>
+        <SectionHeader eyebrow="Paths" title="Places you've logged in Atlas" />
+        <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths">
+          <Route size={20} className="mx-auto text-muted-foreground mb-2" />
+          <div className="text-sm text-muted-foreground">No paths logged in Atlas yet.</div>
+          {atlasBaseUrl && (
+            <a href={atlasBaseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-teal hover:underline mt-3" data-testid="link-open-atlas">
+              Open Atlas <ExternalLink size={11} />
+            </a>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  // ── main render ─────────────────────────────────────────────────────
+  return (
+    <section>
+      <SectionHeader
+        eyebrow="Paths"
+        title="Places you've logged in Atlas"
+        description={`${paths.length} place${paths.length === 1 ? "" : "s"} logged across ${Object.keys(counts).length - 1} categories.`}
+      />
+
+      {/* Map */}
+      <div className="mb-6">
+        <PathsMap paths={filtered} />
+      </div>
+
+      {/* Filter chips */}
+      <div className="mb-5 flex flex-wrap gap-2" data-testid="paths-filters">
+        {availableFilters.map((f) => {
+          const active = filter === f.id;
+          const count = counts[f.id] || 0;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => { setFilter(f.id); setPage(0); }}
+              data-testid={`filter-paths-${f.id}`}
+              className={`inline-flex items-center gap-2 h-8 px-3 rounded-full border text-xs font-mono uppercase tracking-wider transition-colors ${
+                active
+                  ? "border-teal/60 bg-teal/10 text-teal"
+                  : "border-border bg-card/40 text-muted-foreground hover:text-foreground hover:border-border/80"
+              }`}
+            >
+              {f.id !== "all" && (
+                <span
+                  style={{ background: typeColor(f.id), width: 7, height: 7, borderRadius: 999, display: "inline-block" }}
+                />
+              )}
+              {f.label}
+              <span className={`tabular ${active ? "text-teal" : "text-muted-foreground/60"}`}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Cards grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {pageItems.map((p) => (
+          <div
+            key={p.id}
+            className="rounded-lg border border-border bg-card p-5"
+            data-testid={`card-atlas-path-${p.id}`}
+          >
+            <div className="flex items-start justify-between mb-3 gap-3">
+              <span
+                className="eyebrow uppercase tracking-wider"
+                style={{ color: typeColor(p.type) }}
+              >
+                {typeLabel(p.type)}
+              </span>
+              {p.date && (
+                <span className="font-mono text-[10px] tabular text-muted-foreground">
+                  {new Date(p.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                </span>
+              )}
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-display text-xl leading-tight">{p.name}</div>
+                {p.location && (
+                  <div className="font-mono text-[11px] text-muted-foreground mt-1 truncate">
+                    {p.location}
+                  </div>
+                )}
+              </div>
+              {p.atlasShareUrl && (
+                <a
+                  href={p.atlasShareUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                  data-testid={`link-atlas-share-${p.id}`}
+                  aria-label="View on Atlas"
+                >
+                  <ExternalLink size={13} />
+                </a>
+              )}
+            </div>
+            {p.photoUrl && (
+              <img
+                src={p.photoUrl}
+                alt={p.name}
+                loading="lazy"
+                className="mt-4 w-full h-40 object-cover rounded-md border border-border/60"
+                data-testid={`img-atlas-path-${p.id}`}
+              />
+            )}
+            {p.note && (
+              <p className="mt-4 text-sm text-muted-foreground leading-relaxed line-clamp-3">{p.note}</p>
+            )}
+            {(p.weatherLabel || p.weatherTemp != null || p.moonPhase != null) && (
+              <div className="mt-4 flex items-center flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                {p.weatherLabel && (
+                  <span className="inline-flex items-center gap-1">
+                    <Thermometer size={11} />
+                    {p.weatherLabel}{p.weatherTemp != null ? ` · ${Math.round(p.weatherTemp)}°` : ""}
+                  </span>
+                )}
+                {p.moonPhase != null && (
+                  <span className="inline-flex items-center gap-1">
+                    <Moon size={11} />
+                    {(p.moonPhase * 100).toFixed(0)}%
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="mt-6 flex items-center justify-between" data-testid="paths-pagination">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={safePage === 0}
+            data-testid="button-paths-prev"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-card/40 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft size={14} /> Prev
+          </button>
+          <div className="font-mono text-[11px] tabular text-muted-foreground" data-testid="text-paths-page">
+            Page {safePage + 1} of {totalPages} <span className="text-muted-foreground/60">· {filtered.length} {filter === "all" ? "total" : "in filter"}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={safePage >= totalPages - 1}
+            data-testid="button-paths-next"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-card/40 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Next <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
+
+      {atlasBaseUrl && (
+        <div className="mt-6 text-right">
+          <a
+            href={atlasBaseUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+            data-testid="link-open-atlas-all"
+          >
+            See all on Atlas <ExternalLink size={11} />
+          </a>
+        </div>
+      )}
+    </section>
   );
 }

@@ -64,7 +64,7 @@ export async function fetchAtlasPaths(opts?: { force?: boolean }): Promise<{
 
   const url = `${atlasBaseUrl()}/api/feed?userId=${encodeURIComponent(
     process.env.ATLAS_USER_ID!
-  )}&take=200`;
+  )}&take=500`;
 
   try {
     const res = await fetch(url, {
