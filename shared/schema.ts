@@ -198,3 +198,18 @@ export const plaidItems = sqliteTable("plaid_items", {
 export const insertPlaidItemSchema = createInsertSchema(plaidItems).omit({ id: true, createdAt: true, userId: true });
 export type PlaidItem = typeof plaidItems.$inferSelect;
 export type InsertPlaidItem = z.infer<typeof insertPlaidItemSchema>;
+
+/**
+ * Atlas links — per-Radius-user mapping to an Atlas userId, established via
+ * the /connect/radius consent flow on Atlas. One row per Radius user.
+ */
+export const atlasLinks = sqliteTable("atlas_links", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().unique(),
+  atlasUserId: text("atlas_user_id").notNull(),
+  atlasUsername: text("atlas_username"),
+  atlasName: text("atlas_name"),
+  connectedAt: integer("connected_at").notNull(),
+});
+
+export type AtlasLink = typeof atlasLinks.$inferSelect;

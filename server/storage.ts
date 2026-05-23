@@ -1,4 +1,4 @@
-import { users, sessions, ratings, holdings, watchlist, subscriptions, foodSpots, recFeedback, userItems, secrets, plaidItems } from '@shared/schema';
+import { users, sessions, ratings, holdings, watchlist, subscriptions, foodSpots, recFeedback, userItems, secrets, plaidItems, atlasLinks } from '@shared/schema';
 import type {
   User,
   Session,
@@ -10,6 +10,7 @@ import type {
   RecFeedback, InsertRecFeedback,
   UserItem, InsertUserItem,
   PlaidItem,
+  AtlasLink,
 } from '@shared/schema';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -184,6 +185,14 @@ sqlite.exec(`
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_plaid_items_user ON plaid_items(user_id);
+  CREATE TABLE IF NOT EXISTS atlas_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE,
+    atlas_user_id TEXT NOT NULL,
+    atlas_username TEXT,
+    atlas_name TEXT,
+    connected_at INTEGER NOT NULL
+  );
 `);
 
 // Forward-compat: CREATE TABLE IF NOT EXISTS doesn't add columns to an
@@ -342,6 +351,11 @@ export interface IStorage {
   savePlaidItem(userId: number, item: { itemId: string; accessToken: string; institutionName?: string }): Promise<PlaidItem>;
   getPlaidItems(userId: number): Promise<PlaidItem[]>;
   deletePlaidItem(userId: number, itemId: string): Promise<{ changes: number }>;
+
+  // Atlas link (per-user mapping to an Atlas userId)
+  getAtlasLink(userId: number): Promise<AtlasLink | undefined>;
+  upsertAtlasLink(userId: number, atlasUserId: string, atlasUsername: string | null, atlasName: string | null): Promise<AtlasLink>;
+  deleteAtlasLink(userId: number): Promise<{ changes: number }>;
 
   /**
    * Permanently delete a user and all of their associated data.
@@ -572,6 +586,20 @@ export class DatabaseStorage implements IStorage {
   }
   async deletePlaidItem(userId: number, itemId: string): Promise<{ changes: number }> {
     return db.delete(plaidItems).where(and(eq(plaidItems.userId, userId), eq(plaidItems.itemId, itemId))).run();
+  }
+
+  async getAtlasLink(userId: number): Promise<AtlasLink | undefined> {
+    return db.select().from(atlasLinks).where(eq(atlasLinks.userId, userId)).get();
+  }
+  async upsertAtlasLink(userId: number, atlasUserId: string, atlasUsername: string | null, atlasName: string | null): Promise<AtlasLink> {
+    const existing = await this.getAtlasLink(userId);
+    if (existing) {
+      return db.update(atlasLinks).set({ atlasUserId, atlasUsername, atlasName, connectedAt: Date.now() }).where(eq(atlasLinks.userId, userId)).returning().get();
+    }
+    return db.insert(atlasLinks).values({ userId, atlasUserId, atlasUsername, atlasName, connectedAt: Date.now() }).returning().get();
+  }
+  async deleteAtlasLink(userId: number): Promise<{ changes: number }> {
+    return db.delete(atlasLinks).where(eq(atlasLinks.userId, userId)).run();
   }
 }
 

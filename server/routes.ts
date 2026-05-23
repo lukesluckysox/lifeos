@@ -11,7 +11,7 @@ import * as Plaid from "./plaid";
 import { seedCatalog, type CatalogItem } from "./catalog-seed";
 import { seedEvents, type SeedEvent } from "./events-seed";
 import { requireAuth, optionalAuth, setSessionCookie, clearSessionCookie } from "./auth";
-import { fetchAtlasPaths, atlasShareUrl, atlasConfigured, atlasBaseUrl } from "./atlas";
+import { fetchAtlasPathsForUser, atlasShareUrl, atlasServerConfigured, atlasBaseUrl, exchangeAtlasCode, invalidateAtlasCache } from "./atlas";
 import { randomUUID } from "node:crypto";
 
 const TMDB_KEY = process.env.TMDB_API_KEY;
@@ -170,6 +170,22 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // ── Demo Atlas link ─────────────────────────────────────────────────────────────
+  // Seed user_id=1 (the QA/demo user) with Jay's real Atlas cuid so the
+  // built-in demo flow keeps showing paths without needing the consent
+  // dance. Idempotent — upsert is a no-op if the row already exists with
+  // these values.
+  try {
+    const demoAtlasUserId = "cmo8acnpz000001plt4af7fpe";
+    const existing = await storage.getAtlasLink(1);
+    if (!existing) {
+      await storage.upsertAtlasLink(1, demoAtlasUserId, "jay", "Jay Thomas");
+      console.log("[atlas] seeded demo Atlas link for user_id=1");
+    }
+  } catch (e: any) {
+    console.warn("[atlas] demo seed skipped:", e.message);
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // Auth — Spotify OAuth as login
@@ -1022,15 +1038,29 @@ export async function registerRoutes(
   });
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Atlas paths — read-only mirror of paths logged in the sibling app
+  // Atlas paths — per-user read-only mirror of paths logged in the sibling app
   // ══════════════════════════════════════════════════════════════════════════
 
   app.get("/api/paths", requireAuth, async (req, res) => {
     try {
       const force = req.query.refresh === "1";
-      const { paths, source } = await fetchAtlasPaths({ force });
-      // Attach share URLs server-side so the client doesn't need to know
-      // Atlas's base URL.
+      const link = await storage.getAtlasLink(req.user!.id);
+      const serverConfigured = atlasServerConfigured();
+      const baseUrl = serverConfigured ? atlasBaseUrl() : null;
+
+      // No link → user hasn't connected Atlas yet. Surface as an empty,
+      // "connect me" state. `linked: false` is what the client checks.
+      if (!link) {
+        return res.json({
+          paths: [],
+          source: "unlinked",
+          linked: false,
+          configured: serverConfigured,
+          atlasBaseUrl: baseUrl,
+        });
+      }
+
+      const { paths, source } = await fetchAtlasPathsForUser(link.atlasUserId, { force });
       const withShare = paths.map((p) => ({
         ...p,
         atlasShareUrl: atlasShareUrl(p.shareSlug),
@@ -1038,11 +1068,68 @@ export async function registerRoutes(
       res.json({
         paths: withShare,
         source,
-        configured: atlasConfigured(),
-        atlasBaseUrl: atlasConfigured() ? atlasBaseUrl() : null,
+        linked: true,
+        configured: serverConfigured,
+        atlasBaseUrl: baseUrl,
+        atlasUsername: link.atlasUsername,
+        atlasName: link.atlasName,
       });
     } catch (e: any) {
       res.status(500).json({ message: e.message, paths: [], source: "error" });
+    }
+  });
+
+  // ── Atlas OAuth-style consent flow ─────────────────────────────────────
+  // GET /api/atlas/connect → redirect to Atlas /connect/radius
+  // GET /api/atlas/callback?code=... → exchange + persist link, redirect to /#/places
+  // DELETE /api/atlas/link → disconnect
+
+  app.get("/api/atlas/connect", requireAuth, async (_req, res) => {
+    if (!atlasServerConfigured()) {
+      return res.status(503).send("Atlas integration is not configured on the server.");
+    }
+    const target = `${atlasBaseUrl()}/connect/radius`;
+    res.redirect(target);
+  });
+
+  app.get("/api/atlas/callback", requireAuth, async (req, res) => {
+    const code = (req.query.code as string | undefined)?.trim();
+    const err = (req.query.error as string | undefined)?.trim();
+    if (err) {
+      return res.redirect(`/#/places?atlas_error=${encodeURIComponent(err)}`);
+    }
+    if (!code) {
+      return res.redirect("/#/places?atlas_error=missing_code");
+    }
+    try {
+      const result = await exchangeAtlasCode(code);
+      if (!result) {
+        return res.redirect("/#/places?atlas_error=exchange_failed");
+      }
+      await storage.upsertAtlasLink(
+        req.user!.id,
+        result.atlasUserId,
+        result.atlasUsername,
+        result.atlasName
+      );
+      // Bust the cache for this Atlas userId so the first /api/paths hit
+      // after linking returns fresh data.
+      invalidateAtlasCache(result.atlasUserId);
+      res.redirect("/#/places?atlas_connected=1");
+    } catch (e: any) {
+      console.error("[atlas] callback failed:", e.message);
+      res.redirect(`/#/places?atlas_error=${encodeURIComponent("server_error")}`);
+    }
+  });
+
+  app.delete("/api/atlas/link", requireAuth, async (req, res) => {
+    try {
+      const link = await storage.getAtlasLink(req.user!.id);
+      const r = await storage.deleteAtlasLink(req.user!.id);
+      if (link) invalidateAtlasCache(link.atlasUserId);
+      res.json({ ok: true, changes: r.changes });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
     }
   });
 

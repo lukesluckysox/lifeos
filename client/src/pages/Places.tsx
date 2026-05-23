@@ -63,9 +63,12 @@ type AtlasPath = {
 };
 type PathsResp = {
   paths: AtlasPath[];
-  source: "atlas" | "cache" | "unconfigured" | "error";
+  source: "atlas" | "cache" | "unconfigured" | "unlinked" | "error";
+  linked?: boolean;
   configured: boolean;
   atlasBaseUrl: string | null;
+  atlasUsername?: string | null;
+  atlasName?: string | null;
 };
 
 function slugify(s: string) {
@@ -135,6 +138,8 @@ function PlacesMain() {
   });
   const atlasPaths = pathsQuery.data?.paths ?? [];
   const atlasConfigured = pathsQuery.data?.configured ?? false;
+  const atlasLinked = pathsQuery.data?.linked ?? false;
+  const atlasUsername = pathsQuery.data?.atlasUsername ?? null;
 
   const guideQuery = useQuery<TravelGuide>({
     queryKey: ["/api/travel-guide", city],
@@ -453,6 +458,8 @@ function PlacesMain() {
       <AtlasPathsSection
         paths={atlasPaths}
         configured={atlasConfigured}
+        linked={atlasLinked}
+        atlasUsername={atlasUsername}
         isLoading={pathsQuery.isLoading}
         atlasBaseUrl={pathsQuery.data?.atlasBaseUrl}
       />
@@ -497,11 +504,15 @@ const ATLAS_FILTERS: { id: string; label: string }[] = [
 function AtlasPathsSection({
   paths,
   configured,
+  linked,
+  atlasUsername,
   isLoading,
   atlasBaseUrl,
 }: {
   paths: AtlasPath[];
   configured: boolean;
+  linked: boolean;
+  atlasUsername: string | null;
   isLoading: boolean;
   atlasBaseUrl: string | null | undefined;
 }) {
@@ -530,24 +541,40 @@ function AtlasPathsSection({
   const pageItems = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
   // ── empty / loading states ──────────────────────────────────────────
+  // Server not configured at all — admin needs to set ATLAS_BASE_URL / ATLAS_FEED_TOKEN.
   if (!configured && !isLoading) {
     return (
       <section>
         <SectionHeader eyebrow="Paths" title="Places you've logged in Atlas" />
         <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths-unconfigured">
           <Route size={20} className="mx-auto text-muted-foreground mb-2" />
-          <div className="text-sm text-muted-foreground">Connect Atlas to see places you've walked.</div>
+          <div className="text-sm text-muted-foreground">Atlas integration isn't set up on this server.</div>
           <div className="text-xs text-muted-foreground/70 mt-1 max-w-sm mx-auto">
-            Atlas is the sibling app that logs the routes you actually take. Once it's linked, your real-world paths show up here.
+            Atlas is the sibling app that logs the routes you actually take. Once an admin links it, your real-world paths show up here.
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // Server configured but this user hasn't connected their Atlas account yet.
+  // Hand them off to the Atlas /connect/radius consent flow.
+  if (!linked && !isLoading) {
+    return (
+      <section>
+        <SectionHeader eyebrow="Paths" title="Places you've logged in Atlas" />
+        <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths-unlinked">
+          <Route size={20} className="mx-auto text-muted-foreground mb-2" />
+          <div className="text-sm text-muted-foreground">Connect your Atlas account.</div>
+          <div className="text-xs text-muted-foreground/70 mt-1 max-w-sm mx-auto">
+            Atlas is the sibling app that logs the routes you actually take. Link it once and your real-world paths show up here — read-only.
           </div>
           <a
-            href="https://traces.up.railway.app"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-teal hover:underline mt-4 font-mono uppercase tracking-wider"
-            data-testid="link-open-atlas-empty"
+            href="/api/atlas/connect"
+            className="inline-flex items-center gap-1 rounded-md bg-teal/15 px-3 py-1.5 text-xs text-teal hover:bg-teal/25 mt-4 font-mono uppercase tracking-wider transition"
+            data-testid="button-connect-atlas"
           >
-            Open Atlas <ExternalLink size={11} />
+            Connect Atlas <ExternalLink size={11} />
           </a>
         </div>
       </section>
