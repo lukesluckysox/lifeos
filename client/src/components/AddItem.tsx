@@ -59,7 +59,7 @@ export function AddItem({
           data-testid={`button-add-${kind}`}
           className={`inline-flex items-center gap-1 text-[11px] font-mono uppercase tracking-[0.15em] text-muted-foreground hover:text-foreground transition-colors ${className}`}
         >
-          <Plus size={12} /> add
+          <Plus size={12} /> {label || "add"}
         </button>
       );
     }

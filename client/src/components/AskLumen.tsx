@@ -86,10 +86,10 @@ export function AskLumen() {
         onClick={() => setOpen(true)}
         data-testid="button-ask-lumen"
         aria-label="Ask Lumen"
-        className="fixed bottom-5 right-5 z-40 group flex items-center gap-2 rounded-full bg-teal text-black px-4 py-3 shadow-lg shadow-teal/20 hover:shadow-teal/40 hover:scale-105 transition-all"
+        title="Ask Lumen"
+        className="fixed bottom-5 right-5 z-40 h-11 w-11 grid place-items-center rounded-full bg-teal text-black shadow-lg shadow-teal/20 hover:shadow-teal/40 hover:scale-105 transition-all"
       >
-        <Sparkles size={16} />
-        <span className="text-xs font-mono uppercase tracking-wider">Ask Lumen</span>
+        <Sparkles size={18} strokeWidth={2} />
       </button>
 
       {/* Backdrop + panel */}

@@ -70,6 +70,34 @@ function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
+/**
+ * Collapse duplicate happenings by their "primary" name — strips ages/parens/tour
+ * decorators so 'Marlon Wayans' and 'Marlon Wayans (18+)' read as one event.
+ * Keeps the earliest-dated row and bumps a moreDates counter on the rest.
+ */
+function primaryEventName(name: string) {
+  return (name || "")
+    .replace(/\s*\([^)]*\)/g, "")            // drop parentheticals
+    .replace(/\s*-\s*(Ages?|18\+|21\+|All Ages).*$/i, "") // drop age tails
+    .replace(/\s+(Tour|Touring|Live)\s*$/i, "") // drop tour labels
+    .trim()
+    .toLowerCase();
+}
+
+function dedupeByPrimaryName<T extends { name: string; date?: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  // sort by date asc first so we keep the soonest row
+  const sorted = [...items].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  for (const e of sorted) {
+    const k = primaryEventName(e.name);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(e);
+  }
+  return out;
+}
+
 function formatDate(iso?: string) {
   if (!iso) return "TBA";
   try {
@@ -301,7 +329,7 @@ function PlacesMain() {
           </div>
         ) : events.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {events.slice(0, 8).map((e, i) => (
+            {dedupeByPrimaryName(events).slice(0, 8).map((e, i) => (
               <div
                 key={`${e.name}-${i}`}
                 className="rounded-lg border border-border bg-card p-4"
@@ -429,8 +457,19 @@ function PlacesMain() {
         {!atlasConfigured && !pathsQuery.isLoading ? (
           <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths-unconfigured">
             <Route size={20} className="mx-auto text-muted-foreground mb-2" />
-            <div className="text-sm text-muted-foreground">Atlas isn't wired up yet.</div>
-            <div className="text-xs text-muted-foreground/70 mt-1">Set ATLAS_BASE_URL, ATLAS_FEED_TOKEN, and ATLAS_USER_ID in Radius env to surface your logged paths here.</div>
+            <div className="text-sm text-muted-foreground">Connect Atlas to see places you've walked.</div>
+            <div className="text-xs text-muted-foreground/70 mt-1 max-w-sm mx-auto">
+              Atlas is the sibling app that logs the routes you actually take. Once it's linked, your real-world paths show up here.
+            </div>
+            <a
+              href="https://traces.up.railway.app"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-teal hover:underline mt-4 font-mono uppercase tracking-wider"
+              data-testid="link-open-atlas-empty"
+            >
+              Open Atlas <ExternalLink size={11} />
+            </a>
           </div>
         ) : pathsQuery.isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

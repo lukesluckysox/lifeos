@@ -412,15 +412,16 @@ function FinancePortfolio() {
       <section>
         <SectionHeader eyebrow="Add holding" title="Manual entry" />
         <div className="rounded-lg border border-border bg-card p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr_1fr_1fr_auto] gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr_1fr_1fr_auto] gap-2">
             <select
               value={form.kind}
               onChange={e => setForm({ ...form, kind: e.target.value as any })}
-              className="h-9 px-2 rounded-md border border-border bg-background text-sm font-mono"
+              className="h-9 px-3 pr-8 rounded-md border border-border bg-background text-sm font-mono appearance-none bg-no-repeat bg-right cursor-pointer hover:border-teal/40 focus:border-teal focus:outline-none transition-colors"
+              style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")", backgroundPosition: "right 0.65rem center" }}
               data-testid="select-holding-kind"
             >
-              <option value="stock">stock</option>
-              <option value="crypto">crypto</option>
+              <option value="stock">Stock</option>
+              <option value="crypto">Crypto</option>
             </select>
             <input
               placeholder="Symbol (e.g. NVDA)"
@@ -494,15 +495,16 @@ function FinancePortfolio() {
       <section>
         <SectionHeader eyebrow="Watching" title="Watchlist" />
         <div className="rounded-lg border border-border bg-card p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr_2fr_auto] gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr_2fr_auto] gap-2">
             <select
               value={wForm.kind}
               onChange={e => setWForm({ ...wForm, kind: e.target.value as any })}
-              className="h-9 px-2 rounded-md border border-border bg-background text-sm font-mono"
+              className="h-9 px-3 pr-8 rounded-md border border-border bg-background text-sm font-mono appearance-none bg-no-repeat bg-right cursor-pointer hover:border-teal/40 focus:border-teal focus:outline-none transition-colors"
+              style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")", backgroundPosition: "right 0.65rem center" }}
               data-testid="select-watch-kind"
             >
-              <option value="stock">stock</option>
-              <option value="crypto">crypto</option>
+              <option value="stock">Stock</option>
+              <option value="crypto">Crypto</option>
             </select>
             <input
               placeholder="Symbol"

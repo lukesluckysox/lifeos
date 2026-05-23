@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Sun, Moon, Download, LogOut, Trash2, Plug, Check, X, AlertTriangle } from "lucide-react";
+import { Sun, Moon, Download, LogOut, Trash2, Plug, Check, X, AlertTriangle, ArrowUpRight } from "lucide-react";
+import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/components/AuthProvider";
 import { useTheme } from "@/components/ThemeProvider";
@@ -64,15 +65,21 @@ export default function Settings() {
   if (!user) return null;
 
   return (
-    <div className="space-y-12 animate-fade-in max-w-2xl" data-testid="page-settings">
-      <section className="pt-2">
+    <div className="animate-fade-in" data-testid="page-settings">
+      <section className="pt-2 max-w-2xl">
         <div className="eyebrow mb-4">Settings</div>
         <h1 className="font-display text-[clamp(1.5rem,3.5vw,2.5rem)] leading-[1.05] tracking-tight">
           Your <span className="text-teal italic">Radius</span>.
         </h1>
+        <p className="mt-3 text-base text-muted-foreground max-w-xl leading-relaxed">
+          Manage your account, connected services, and data.
+        </p>
       </section>
 
-      <div className="hairline" />
+      <div className="hairline my-10" />
+
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-12">
+        <div className="space-y-12 min-w-0">
 
       {/* Account */}
       <Section title="Account">
@@ -203,7 +210,7 @@ export default function Settings() {
       </Section>
 
       {/* Danger zone */}
-      <Section title="Danger zone">
+        <Section title="Danger zone">
         {!confirmingDelete ? (
           <button
             type="button"
@@ -248,7 +255,45 @@ export default function Settings() {
             </div>
           </div>
         )}
-      </Section>
+        </Section>
+        </div>
+
+        {/* Right rail — About Radius */}
+        <aside className="space-y-8" data-testid="aside-settings-about">
+          <div className="rounded-xl border border-border bg-card/40 p-5 space-y-3">
+            <div className="eyebrow">About Radius</div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Your money, your music, your places — in one place. Radius pulls signal from the apps you already use and lays it out as one dashboard.
+            </p>
+            <Link href="/whats-new">
+              <span
+                data-testid="link-settings-whats-new"
+                className="inline-flex items-center gap-1 text-xs text-teal hover:text-teal/80 transition-colors font-mono uppercase tracking-wider cursor-pointer"
+              >
+                What’s new <ArrowUpRight size={11} />
+              </span>
+            </Link>
+          </div>
+          <div className="rounded-xl border border-border bg-card/40 p-5 space-y-3">
+            <div className="eyebrow">Sibling app</div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Atlas is the journal half of the system — voice notes, daily traces, and patterns over time.
+            </p>
+            <a
+              href="https://traces.up.railway.app"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="link-settings-atlas"
+              className="inline-flex items-center gap-1 text-xs text-teal hover:text-teal/80 transition-colors font-mono uppercase tracking-wider"
+            >
+              Open Atlas <ArrowUpRight size={11} />
+            </a>
+          </div>
+          <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground/60">
+            v0.4 · made in Hawaii
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

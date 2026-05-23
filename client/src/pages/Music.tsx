@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, RefreshCw, Music as MusicIcon, Disc3, CalendarClock } from "lucide-react";
+import { ExternalLink, RefreshCw, Music as MusicIcon, Disc3, CalendarClock, Plug } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useMode } from "@/components/ModeProvider";
 
@@ -275,10 +275,21 @@ function EmptyHint({ message }: { message: string }) {
 function UnauthorizedHint() {
   return (
     <div
-      className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 text-sm text-muted-foreground"
+      className="rounded-lg border border-border bg-card/40 px-5 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
       data-testid="text-music-unauth"
     >
-      Connect Spotify to see your music. (Auth via the profile menu.)
+      <div>
+        <div className="text-sm font-medium">Connect Spotify to see your music.</div>
+        <div className="text-xs text-muted-foreground mt-0.5">Read-only. We pull your top artists, recent plays, and upcoming releases.</div>
+      </div>
+      <a
+        href="/api/auth/spotify/login"
+        className="inline-flex items-center justify-center gap-2 rounded-md bg-teal text-background hover:bg-teal/90 transition-colors px-4 py-2 text-xs font-mono uppercase tracking-wider shrink-0"
+        data-testid="button-connect-spotify-music"
+      >
+        <Plug size={12} />
+        Connect Spotify
+      </a>
     </div>
   );
 }
@@ -334,8 +345,11 @@ export default function Music() {
           <div>
             <div className="eyebrow mb-3">Music</div>
             <h1 className="font-display text-[clamp(1.875rem,3.5vw,2.75rem)] leading-[1.02] tracking-tight">
-              What you've been on — rolled up by genre, with what's coming next.
+              Your taste, in one place.
             </h1>
+            <p className="mt-3 text-sm text-muted-foreground max-w-xl leading-relaxed">
+              Recent plays rolled up by genre, your followed artists, and new releases worth your time.
+            </p>
           </div>
           <button
             type="button"
@@ -417,7 +431,7 @@ export default function Music() {
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
             Last played
           </div>
-          <h2 className="font-display text-lg leading-tight mt-1">By genre</h2>
+          <h2 className="font-display text-lg leading-tight mt-1">Recent genres</h2>
         </div>
         {recentGenre.isLoading ? (
           <GenreGridSkeleton />
@@ -437,7 +451,7 @@ export default function Music() {
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">
             On rotation · last 4 weeks
           </div>
-          <h2 className="font-display text-lg leading-tight mt-1">By genre</h2>
+          <h2 className="font-display text-lg leading-tight mt-1">What's been on heavy</h2>
         </div>
         {rotationGenre.isLoading ? (
           <GenreGridSkeleton />

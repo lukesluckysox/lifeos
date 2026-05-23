@@ -1425,9 +1425,20 @@ export async function registerRoutes(
       } catch {}
     }
 
+    // Deduplicate: same Ticketmaster event can return for multiple artist queries
+    // (e.g. 'Mariah the Scientist' shows up for both 'Mariah' and the headliner).
+    // Key by URL (most stable) then fall back to name+date+venue.
+    const seenConcerts = new Set<string>();
+    const dedupedConcerts = concerts.filter((c: any) => {
+      const k = (c.url || `${c.name || ""}|${c.date || ""}|${c.venue || ""}`).toLowerCase();
+      if (seenConcerts.has(k)) return false;
+      seenConcerts.add(k);
+      return true;
+    });
+
     const effectiveUserId = userId ?? 0;
     const { items: ranked, learning } = await rerankWithFeedback(
-      concerts, effectiveUserId, "concert",
+      dedupedConcerts, effectiveUserId, "concert",
       (c: any) => `${c.artist || c.name}-${c.date || ""}`,
       (c: any) => `${c.artist || ""} ${c.name || ""} ${c.venue || ""}`,
     );

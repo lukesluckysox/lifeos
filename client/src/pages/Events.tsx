@@ -129,10 +129,10 @@ export default function Events() {
           <div className="flex items-center gap-2 px-3 h-10 rounded-md border border-border text-xs text-muted-foreground">
             {geoStatus === "locating" ? <Loader2 size={12} className="animate-spin" /> : <LocateFixed size={12} />}
             <span>
-              {geoStatus === "ok" && "auto-detected"}
+              {geoStatus === "ok" && "using your location"}
               {geoStatus === "locating" && "locating…"}
-              {geoStatus === "denied" && "manual"}
-              {geoStatus === "idle" && "manual"}
+              {geoStatus === "denied" && "set by you"}
+              {geoStatus === "idle" && "set by you"}
             </span>
           </div>
         </form>

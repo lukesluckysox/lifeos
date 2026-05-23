@@ -151,26 +151,34 @@ export default function Home() {
           <div className="font-display text-2xl leading-none tabular" data-testid="text-home-net-worth">
             ${netWorth.toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </div>
-          <div className="mt-2 flex items-center gap-2 text-xs">
-            {dayChange >= 0 ? <TrendingUp size={12} className="text-teal" /> : <TrendingDown size={12} className="text-rose" />}
-            <span className={`${dayChange >= 0 ? "text-teal" : "text-rose"} tabular font-mono`}>
-              {dayChange >= 0 ? "+" : "−"}${Math.abs(dayChange).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            </span>
-            <span className={`tabular font-mono ${dayChange >= 0 ? "text-teal" : "text-rose"}`}>
-              ({dayChange >= 0 ? "+" : ""}{dayChangePct.toFixed(2)}%)
-            </span>
-            <span className="text-muted-foreground">today</span>
-          </div>
-          {portfolioHistory && portfolioHistory.points.length > 1 && (
-            <div className="mt-4">
-              <Sparkline points={portfolioHistory.points} positive={(portfolioHistory.sixMonthReturnPct ?? 0) >= 0} />
+          {netWorth > 0 ? (
+            <>
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                {dayChange >= 0 ? <TrendingUp size={12} className="text-teal" /> : <TrendingDown size={12} className="text-rose" />}
+                <span className={`${dayChange >= 0 ? "text-teal" : "text-rose"} tabular font-mono`}>
+                  {dayChange >= 0 ? "+" : "−"}${Math.abs(dayChange).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
+                <span className={`tabular font-mono ${dayChange >= 0 ? "text-teal" : "text-rose"}`}>
+                  ({dayChange >= 0 ? "+" : ""}{dayChangePct.toFixed(2)}%)
+                </span>
+                <span className="text-muted-foreground">today</span>
+              </div>
+              {portfolioHistory && portfolioHistory.points.length > 1 && (
+                <div className="mt-4">
+                  <Sparkline points={portfolioHistory.points} positive={(portfolioHistory.sixMonthReturnPct ?? 0) >= 0} />
+                </div>
+              )}
+              <div className="mt-3 grid grid-cols-3 gap-3 pt-3 border-t border-border/40">
+                <Stat label="1d" pct={portfolioHistory?.dayReturnPct} />
+                <Stat label="1m" pct={portfolioHistory?.oneMonthReturnPct} />
+                <Stat label="6m" pct={portfolioHistory?.sixMonthReturnPct} />
+              </div>
+            </>
+          ) : (
+            <div className="mt-3 text-xs text-muted-foreground leading-relaxed">
+              Connect a brokerage or add a holding to track your portfolio.
             </div>
           )}
-          <div className="mt-3 grid grid-cols-3 gap-3 pt-3 border-t border-border/40">
-            <Stat label="1d" pct={portfolioHistory?.dayReturnPct} />
-            <Stat label="1m" pct={portfolioHistory?.oneMonthReturnPct} />
-            <Stat label="6m" pct={portfolioHistory?.sixMonthReturnPct} />
-          </div>
         </DashboardCard>
 
         {/* ===== Places ===== */}
@@ -288,15 +296,9 @@ export default function Home() {
       <footer className="pb-12 space-y-3">
         <div className="flex items-baseline gap-3 flex-wrap">
           <span className="font-display text-xl text-muted-foreground italic">Radius</span>
-          <span className="eyebrow">a personal command room</span>
+          <span className="eyebrow">your money, your music, your places</span>
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-          <Link href="/whats-new">
-            <span className="hover:text-teal transition-colors cursor-pointer" data-testid="link-footer-whats-new">
-              What’s new
-            </span>
-          </Link>
-          <span className="text-muted-foreground/40">·</span>
           <a
             href="https://traces.up.railway.app"
             target="_blank"
@@ -308,7 +310,7 @@ export default function Home() {
             <ArrowUpRight size={10} />
           </a>
           <span className="text-muted-foreground/40">·</span>
-          <span>v0.4 · made in Hawaii</span>
+          <span>made in Hawaii</span>
         </div>
       </footer>
     </div>
@@ -486,14 +488,20 @@ function HeroGreeting({
         Good {partOfDay}, <span className="text-teal italic">{firstName}</span>.
       </h1>
       <p className="mt-3 text-base text-muted-foreground max-w-2xl leading-relaxed" data-testid="text-home-hero-summary">
-        Your portfolio is{" "}
-        <span className={`font-mono tabular ${positive ? "text-teal" : "text-rose"}`}>
-          {positive ? "+" : "−"}${Math.round(animatedChange).toLocaleString()}
-        </span>{" "}
-        <span className={`font-mono tabular ${positive ? "text-teal" : "text-rose"}`}>
-          ({positive ? "+" : ""}{dayChangePct.toFixed(2)}%)
-        </span>{" "}
-        today.
+        {Math.abs(dayChange) > 0 ? (
+          <>
+            Your portfolio is{" "}
+            <span className={`font-mono tabular ${positive ? "text-teal" : "text-rose"}`}>
+              {positive ? "+" : "−"}${Math.round(animatedChange).toLocaleString()}
+            </span>{" "}
+            <span className={`font-mono tabular ${positive ? "text-teal" : "text-rose"}`}>
+              ({positive ? "+" : ""}{dayChangePct.toFixed(2)}%)
+            </span>{" "}
+            today.
+          </>
+        ) : (
+          <>Here’s what’s on your radar today.</>
+        )}
         {trackCount > 0 && (
           <>
             {" "}You’ve played{" "}
