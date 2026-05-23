@@ -430,7 +430,7 @@ function PlacesMain() {
           <div className="rounded-lg border border-dashed border-border bg-card/20 px-5 py-8 text-center" data-testid="empty-paths-unconfigured">
             <Route size={20} className="mx-auto text-muted-foreground mb-2" />
             <div className="text-sm text-muted-foreground">Atlas isn't wired up yet.</div>
-            <div className="text-xs text-muted-foreground/70 mt-1">Set ATLAS_BASE_URL, ATLAS_FEED_TOKEN, and ATLAS_USER_ID in Life OS env to surface your logged paths here.</div>
+            <div className="text-xs text-muted-foreground/70 mt-1">Set ATLAS_BASE_URL, ATLAS_FEED_TOKEN, and ATLAS_USER_ID in Radius env to surface your logged paths here.</div>
           </div>
         ) : pathsQuery.isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

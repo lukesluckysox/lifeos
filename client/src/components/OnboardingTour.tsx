@@ -23,8 +23,8 @@ interface MeResp {
 const STEPS = [
   {
     icon: Sparkles,
-    title: "Welcome to your life-os",
-    body: "Lumen tracks the things you care about — your money, your music, the places you go — in one quiet space. No ads, no noise.",
+    title: "Welcome to Radius",
+    body: "Radius is a quiet space for the things you care about — your money, your music, the places you go. No ads, no reselling. Just you.",
   },
   {
     icon: Search,

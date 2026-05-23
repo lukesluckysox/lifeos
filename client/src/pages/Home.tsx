@@ -253,7 +253,7 @@ export default function Home() {
       <div className="hairline" />
       <footer className="pb-12">
         <div className="flex items-baseline gap-3">
-          <span className="font-display text-xl text-muted-foreground italic">Life OS</span>
+          <span className="font-display text-xl text-muted-foreground italic">Radius</span>
           <span className="eyebrow">a personal command room</span>
         </div>
       </footer>

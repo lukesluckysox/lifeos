@@ -116,12 +116,12 @@ export default function Landing() {
       </div>
 
       {/* Tagline */}
-      <div className="text-center mb-14 space-y-2">
+      <div className="text-center mb-14 space-y-3 max-w-md">
         <h1 className="font-display text-xl tracking-tight text-foreground leading-tight">
-          Everything that makes you, you.
+          Your money, your music, your places — in one place.
         </h1>
-        <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
-          Finance, music, places, events, and film — in one quiet, personal OS.
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          A quiet personal dashboard. Live portfolio from your brokerages, recent listens from Spotify, the places you've saved. One sign-in. No ads.
         </p>
       </div>
 
@@ -217,7 +217,7 @@ export default function Landing() {
       {/* Sub-text */}
       <div className="mt-5 text-center space-y-2">
         <p className="text-[11px] text-muted-foreground/60">
-          Email read-only · we never post on your behalf
+          Read-only access · we don't sell your data · delete anytime
         </p>
         <button
           type="button"
@@ -225,8 +225,29 @@ export default function Landing() {
           onClick={handleDemoMode}
           className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors"
         >
-          Try demo mode
+          Try the demo first →
         </button>
+      </div>
+
+      {/* Trust strip */}
+      <div className="mt-12 max-w-2xl w-full">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
+          {[
+            { eyebrow: "Banking", title: "Plaid read-only", body: "Your broker login never touches our server." },
+            { eyebrow: "Data", title: "Yours alone", body: "No ads. No reselling. No analytics on your behavior." },
+            { eyebrow: "Quit anytime", title: "Delete it all", body: "One click wipes your account and every byte we store." },
+          ].map((t) => (
+            <div key={t.title} className="rounded-lg border border-border/60 bg-card/30 p-4">
+              <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground mb-1">{t.eyebrow}</div>
+              <div className="font-display text-xs text-foreground mb-1">{t.title}</div>
+              <div className="text-[11px] text-muted-foreground leading-snug">{t.body}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-10 text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground/50">
+        Radius · v0.4 · made in Hawaii
       </div>
     </div>
   );

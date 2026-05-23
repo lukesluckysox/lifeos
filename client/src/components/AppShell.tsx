@@ -124,6 +124,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="eyebrow mb-2">signed in as</div>
             <div className="text-sm font-medium">Jay Thomas</div>
             <div className="text-xs text-muted-foreground mt-0.5 font-mono">honolulu · synced 2m ago</div>
+            <div className="mt-3 flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-full bg-teal/10 text-teal px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em]" data-testid="badge-version">
+                <span className="w-1 h-1 rounded-full bg-teal" />
+                v0.4
+              </span>
+              <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60">new · ask lumen</span>
+            </div>
           </div>
         </aside>
 

@@ -81,8 +81,8 @@ function PlaidLinkButtonInner({ onSuccess, disabled }: { onSuccess: (publicToken
         setLinkToken(null);
         setAutoOpened(false);
       }}
-      onInitError={(msg) => {
-        setFetchError(msg);
+      onInitError={() => {
+        setFetchError("Couldn't open the bank link window. Try again in a moment.");
         setLinkToken(null);
         setAutoOpened(false);
       }}
@@ -114,10 +114,18 @@ function PlaidLinkBootstrap({
     try {
       const res = await apiRequest("POST", "/api/plaid/link-token");
       const data = await res.json();
-      if (data.error) { onFetchError(data.error); return; }
+      if (data.error) {
+        onFetchError("Couldn't reach your bank link service. Try again in a moment.");
+        return;
+      }
       onLinkToken(data.linkToken);
     } catch (e: any) {
-      onFetchError(e.message);
+      const msg = (e?.message || "").toLowerCase();
+      if (msg.includes("network") || msg.includes("failed to fetch")) {
+        onFetchError("Network hiccup — check your connection and try again.");
+      } else {
+        onFetchError("Couldn't start the bank link flow. Try again in a moment.");
+      }
     }
   }, [onFetchError, onLinkToken]);
 
@@ -136,7 +144,7 @@ function PlaidLinkBootstrap({
       if (!res.ok) {
         setDebugInfo(`resume: HTTP ${res.status} — body: ${bodyText.slice(0,200)}`);
         onFetchError(
-          `Plaid OAuth resume failed (HTTP ${res.status}). ${bodyText.slice(0,120)}`,
+          "Your bank link session timed out. Tap Connect brokerage to start over.",
         );
         // Strip the oauth_state_id so a refresh doesn't loop on the
         // resume path again.
@@ -148,14 +156,14 @@ function PlaidLinkBootstrap({
       }
       if (!body?.linkToken) {
         setDebugInfo(`resume: 200 but no linkToken in body: ${bodyText.slice(0,200)}`);
-        onFetchError("Plaid OAuth session expired. Please try connecting again.");
+        onFetchError("Bank link session expired. Tap Connect brokerage to try again.");
         return;
       }
       setDebugInfo(`resume: got linkToken — mounting Plaid Link…`);
       onLinkToken(body.linkToken);
     } catch (e: any) {
       setDebugInfo(`resume: threw — ${e?.message || String(e)}`);
-      onFetchError(e.message);
+      onFetchError("Couldn't resume your bank link. Tap Connect brokerage to start over.");
     }
   }, [onFetchError, onLinkToken]);
 
@@ -170,7 +178,7 @@ function PlaidLinkBootstrap({
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-plaid-error">
         <AlertCircle size={12} className="text-amber-400" />
-        <span>Plaid unavailable: {fetchError}</span>
+        <span>{fetchError}</span>
       </div>
     );
   }

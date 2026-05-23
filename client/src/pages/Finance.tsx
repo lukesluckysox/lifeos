@@ -20,6 +20,7 @@ import { ETFTiles } from "@/components/ETFTiles";
 import { CategoryLeaders } from "@/components/CategoryLeaders";
 import { LiveHeartbeat } from "@/components/LiveHeartbeat";
 import { PriceFlash } from "@/components/PriceFlash";
+import { useCountUp } from "@/hooks/useCountUp";
 
 /* ---------- Types ---------- */
 
@@ -249,12 +250,7 @@ function FinancePortfolio() {
         <div className="flex items-end justify-between flex-wrap gap-6">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2">Net worth · USD</div>
-            <div
-              className="font-display text-[clamp(2.5rem,5vw,4rem)] leading-none tabular"
-              data-testid="text-net-worth"
-            >
-              <PriceFlash value={netWorth}>${netWorth.toLocaleString(undefined, { maximumFractionDigits: 2 })}</PriceFlash>
-            </div>
+            <NetWorthDisplay netWorth={netWorth} />
             <div className="mt-3 flex items-center gap-2 text-sm">
               {dayChange >= 0 ? <TrendingUp size={14} className="text-teal" /> : <TrendingDown size={14} className="text-rose" />}
               <span className={`${dayChange >= 0 ? "text-teal" : "text-rose"} tabular font-mono`}>
@@ -810,6 +806,26 @@ export default function Finance() {
       {active === "portfolio" && <FinancePortfolio />}
       {active === "advisor" && <FinanceAdvisor />}
       {active === "subscriptions" && <Subscriptions />}
+    </div>
+  );
+}
+
+/* ---------- NetWorthDisplay ---------- */
+
+/**
+ * Smooth count-up on first paint, then PriceFlash on subsequent updates.
+ * After the initial 1.2s animation the value tracks netWorth directly.
+ */
+function NetWorthDisplay({ netWorth }: { netWorth: number }) {
+  const animated = useCountUp(netWorth, 1400);
+  return (
+    <div
+      className="font-display text-[clamp(2.5rem,5vw,4rem)] leading-none tabular"
+      data-testid="text-net-worth"
+    >
+      <PriceFlash value={netWorth}>
+        ${animated.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+      </PriceFlash>
     </div>
   );
 }

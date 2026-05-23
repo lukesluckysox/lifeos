@@ -55,7 +55,17 @@ export function AskLumen() {
       setAnswer(j.answer || "(empty response)");
       setModel(j.model || "");
     } catch (e: any) {
-      setAnswer(`Error: ${e.message}`);
+      // Friendly error: never expose JSON / status codes / stack traces.
+      const msg = String(e?.message || "").toLowerCase();
+      if (msg.includes("401") || msg.includes("unauth")) {
+        setAnswer("You need to sign back in for Lumen to read your data.");
+      } else if (msg.includes("network") || msg.includes("fetch")) {
+        setAnswer("Lumen couldn't reach the server. Check your connection and try again.");
+      } else if (msg.includes("api key") || msg.includes("anthropic") || msg.includes("claude")) {
+        setAnswer("Lumen is offline right now — the AI model is unreachable. Try again in a moment.");
+      } else {
+        setAnswer("Something went wrong on Lumen's end. Give it another try in a moment.");
+      }
     } finally {
       setLoading(false);
     }
