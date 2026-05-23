@@ -158,6 +158,27 @@ export async function getInvestmentHoldings(accessToken: string): Promise<any> {
   return response.data;
 }
 
+/**
+ * Get general banking/credit transactions for an access token.
+ * Used for subscription detection — we look for recurring merchant
+ * charges in the user's checking/credit card transactions.
+ */
+export async function getTransactions(
+  accessToken: string,
+  startDate: string,
+  endDate: string,
+  count = 500,
+): Promise<any> {
+  const client = getClient();
+  const response = await client.transactionsGet({
+    access_token: accessToken,
+    start_date: startDate,
+    end_date: endDate,
+    options: { count, offset: 0 },
+  });
+  return response.data;
+}
+
 /** Get investment transactions for an access token. */
 export async function getInvestmentTransactions(
   accessToken: string,

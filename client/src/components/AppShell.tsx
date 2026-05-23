@@ -1,6 +1,6 @@
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Sun, Moon, Search, Music, MapPin, LineChart, Home as HomeIcon, Menu, X, Tv, Calendar, BellOff, Bell, Bookmark, RefreshCw } from "lucide-react";
+import { Sun, Moon, Search, Music, MapPin, LineChart, Home as HomeIcon, Menu, X, Tv, Calendar, BellOff, Bell, Bookmark, RefreshCw, Settings } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { useTheme } from "./ThemeProvider";
 import { useMode } from "./ModeProvider";
@@ -17,6 +17,7 @@ const NAV = [
   { href: "/music", label: "Music", icon: Music },
   { href: "/watch", label: "Watch", icon: Tv },
   { href: "/saved", label: "Saved", icon: Bookmark },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 const QUIET_DOMAINS: QuietDomain[] = ["music", "finance", "film", "watch", "events", "places", "food", "concerts"];
@@ -125,11 +126,23 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="text-sm font-medium">Jay Thomas</div>
             <div className="text-xs text-muted-foreground mt-0.5 font-mono">honolulu · synced 2m ago</div>
             <div className="mt-3 flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-full bg-teal/10 text-teal px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em]" data-testid="badge-version">
-                <span className="w-1 h-1 rounded-full bg-teal" />
-                v0.4
-              </span>
-              <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60">new · ask lumen</span>
+              <Link href="/whats-new">
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-teal/10 hover:bg-teal/20 text-teal px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] cursor-pointer transition-colors"
+                  data-testid="badge-version"
+                >
+                  <span className="w-1 h-1 rounded-full bg-teal animate-pulse" />
+                  v0.4
+                </span>
+              </Link>
+              <Link href="/whats-new">
+                <span
+                  className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60 hover:text-teal transition-colors cursor-pointer"
+                  data-testid="link-whats-new-hint"
+                >
+                  what’s new
+                </span>
+              </Link>
             </div>
           </div>
         </aside>

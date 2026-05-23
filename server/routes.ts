@@ -316,6 +316,101 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
+  /**
+   * Onboarding checklist status — used by the Home page to show a
+   * first-run checklist that disappears once the user has set everything up.
+   * Each step is derived from real state, not stored as a flag.
+   */
+  app.get("/api/onboarding-status", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const u = req.user as any;
+      const [plaidItems, holdings, watchlist, foodSpots] = await Promise.all([
+        storage.getPlaidItems(userId).catch(() => []),
+        storage.listHoldings(userId).catch(() => []),
+        storage.listWatchlist(userId).catch(() => []),
+        storage.listFoodSpots(userId).catch(() => []),
+      ]);
+      const steps = [
+        { id: "account", label: "Sign in", done: true },
+        { id: "spotify", label: "Connect Spotify", done: !!u.spotifyId, href: "/music" },
+        { id: "brokerage", label: "Connect a brokerage", done: plaidItems.length > 0, href: "/finance" },
+        {
+          id: "first-touch",
+          label: "Add something you care about",
+          done: (holdings.length + watchlist.length + foodSpots.length) > 0,
+          href: "/saved",
+        },
+        { id: "dismiss", label: "You're set up", done: !!u.onboardingCompleted },
+      ];
+      const completedCount = steps.filter(s => s.done).length;
+      res.json({
+        steps,
+        completedCount,
+        totalCount: steps.length,
+        hidden: !!u.onboardingCompleted,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  /**
+   * Export everything Radius has stored about the signed-in user as one
+   * JSON document. Used by Settings > Export my data. Plaid access tokens
+   * are redacted; only institution names are exposed.
+   */
+  app.get("/api/auth/export", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const [plaidItems, holdings, watchlist, subscriptions, foodSpots, ratings, userItems, recFeedback] = await Promise.all([
+        storage.getPlaidItems(userId).catch(() => []),
+        storage.listHoldings(userId).catch(() => []),
+        storage.listWatchlist(userId).catch(() => []),
+        storage.listSubscriptions(userId).catch(() => []),
+        storage.listFoodSpots(userId).catch(() => []),
+        storage.listRatings(userId).catch(() => []),
+        storage.listUserItems(userId).catch(() => []),
+        storage.listRecFeedback(userId).catch(() => []),
+      ]);
+      const u = req.user as any;
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        appVersion: "v0.4",
+        user: {
+          id: u.id, displayName: u.displayName, email: u.email,
+          avatarUrl: u.avatarUrl, createdAt: u.createdAt,
+          spotifyConnected: !!u.spotifyId, googleConnected: !!u.googleId,
+        },
+        connections: {
+          plaidItems: plaidItems.map((p: any) => ({
+            id: p.id, institutionName: p.institutionName, createdAt: p.createdAt,
+          })),
+        },
+        holdings, watchlist, subscriptions, foodSpots, ratings, userItems, recFeedback,
+      };
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="radius-export-${new Date().toISOString().slice(0,10)}.json"`);
+      res.send(JSON.stringify(payload, null, 2));
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  /**
+   * Permanently delete the signed-in user and all of their data.
+   * Also clears the session cookie.
+   */
+  app.delete("/api/auth/account", requireAuth, async (req, res) => {
+    try {
+      const r = await storage.deleteUserAndAllData(req.user!.id);
+      clearSessionCookie(res);
+      res.json({ ok: true, changes: r.changes });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.post("/api/auth/logout", optionalAuth, async (req, res) => {
     const sid = req.cookies?.sid as string | undefined;
     if (sid) await storage.deleteSession(sid);
@@ -1486,14 +1581,78 @@ export async function registerRoutes(
   app.get("/api/subscriptions", optionalAuth, async (req, res) => {
     const mode = (req.query.mode as string | undefined) === "demo" ? "demo" : "live";
     const userId = req.user?.id;
-    const fileName = mode === "demo" ? "transactions-snapshot-demo.json" : "transactions-snapshot.json";
-    const snap = loadSnapshot<any>(fileName);
+
+    // Collect transactions from the right source.
+    // - demo mode: fixture file
+    // - live mode: real Plaid transactions for this user's items, falling
+    //   back to the snapshot file only if the user has no Plaid items
+    //   connected yet.
+    type Tx = { merchant: string; date: string; amount: number; category: string };
+    let txs: Tx[] = [];
+    let txSource = "snapshot";
+
+    if (mode === "demo") {
+      const snap = loadSnapshot<any>("transactions-snapshot-demo.json");
+      txs = (snap?.transactions ?? []).map((t: any) => ({
+        merchant: t.merchant, date: t.date, amount: t.amount, category: t.category,
+      }));
+      txSource = "demo-fixture";
+    } else if (userId) {
+      try {
+        const items = await storage.getPlaidItems(userId);
+        if (items.length > 0) {
+          const endDate = new Date();
+          const startDate = new Date(endDate.getTime() - 90 * 86400000);
+          const fmt = (d: Date) => d.toISOString().slice(0, 10);
+          const collected: Tx[] = [];
+          for (const item of items) {
+            try {
+              const data: any = await Plaid.getTransactions(item.accessToken, fmt(startDate), fmt(endDate));
+              for (const t of data.transactions || []) {
+                // Plaid amounts are positive for debits (money out).
+                // Skip credits (refunds, deposits) and unusually large purchases.
+                if (!t.amount || t.amount <= 0 || t.amount > 500) continue;
+                const merchant = (t.merchant_name || t.name || "").trim();
+                if (!merchant) continue;
+                collected.push({
+                  merchant,
+                  date: t.date,
+                  amount: t.amount,
+                  category: (t.personal_finance_category?.primary || t.category?.[0] || "").toString(),
+                });
+              }
+            } catch (e: any) {
+              console.warn("[subscriptions] Plaid getTransactions failed for item", item.id, e?.message || e);
+            }
+          }
+          if (collected.length > 0) {
+            txs = collected;
+            txSource = "plaid-live";
+          }
+        }
+      } catch (e: any) {
+        console.warn("[subscriptions] Plaid items lookup failed", e?.message || e);
+      }
+      // Fallback to live snapshot if no Plaid items or all calls failed
+      if (txs.length === 0) {
+        const snap = loadSnapshot<any>("transactions-snapshot.json");
+        txs = (snap?.transactions ?? []).map((t: any) => ({
+          merchant: t.merchant, date: t.date, amount: t.amount, category: t.category,
+        }));
+        txSource = "snapshot-fallback";
+      }
+    }
 
     const detected: any[] = [];
-    if (snap?.transactions) {
+    if (txs.length > 0) {
       const byMerchant = new Map<string, { dates: string[]; amounts: number[]; category: string }>();
-      for (const t of snap.transactions) {
-        if (t.category !== "Subscription") continue;
+      // In live (Plaid) mode we don't filter by category since Plaid's
+      // taxonomy is granular — we instead rely on the recurring-cadence
+      // heuristic below to identify subscriptions. In demo we keep the
+      // original tight "Subscription" filter.
+      const restrictCategory = txSource === "demo-fixture" || txSource === "snapshot-fallback";
+      for (const t of txs) {
+        if (restrictCategory && t.category !== "Subscription") continue;
         const entry = byMerchant.get(t.merchant) || { dates: [], amounts: [], category: t.category };
         entry.dates.push(t.date); entry.amounts.push(t.amount);
         byMerchant.set(t.merchant, entry);
@@ -1506,8 +1665,21 @@ export async function registerRoutes(
             gaps.push((new Date(sorted[i]).getTime() - new Date(sorted[i - 1]).getTime()) / 86400000);
           }
           const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-          const cadence = avgGap >= 25 && avgGap <= 35 ? "monthly" : avgGap >= 6 && avgGap <= 8 ? "weekly" : avgGap >= 350 ? "yearly" : "monthly";
+          // Subscription cadence detection: tolerate ±4 days on each band.
+          // If gaps don't match any expected cadence, skip — this filters
+          // out one-off purchases at recurring merchants (e.g. groceries).
+          let cadence: "weekly" | "monthly" | "yearly" | null = null;
+          if (avgGap >= 25 && avgGap <= 35) cadence = "monthly";
+          else if (avgGap >= 6 && avgGap <= 8) cadence = "weekly";
+          else if (avgGap >= 350 && avgGap <= 380) cadence = "yearly";
+          if (!cadence) continue;
+
+          // Also require amounts to be roughly consistent (within 15%)
+          // to filter out variable-amount merchants.
           const avgAmount = info.amounts.reduce((a, b) => a + b, 0) / info.amounts.length;
+          const maxDev = Math.max(...info.amounts.map(a => Math.abs(a - avgAmount) / avgAmount));
+          if (maxDev > 0.15 && txSource === "plaid-live") continue;
+
           const lastDate = new Date(sorted[sorted.length - 1]);
           const next = new Date(lastDate.getTime() + avgGap * 86400000);
           detected.push({
@@ -1527,7 +1699,13 @@ export async function registerRoutes(
       if (x.cadence === "weekly") return s + x.amount * 4.33;
       return s;
     }, 0);
-    res.json({ detected, manual, all: [...detected, ...manual], totalMonthly: Math.round(totalMonthly * 100) / 100 });
+    res.json({
+      detected,
+      manual,
+      all: [...detected, ...manual],
+      totalMonthly: Math.round(totalMonthly * 100) / 100,
+      source: txSource,
+    });
   });
 
   app.post("/api/subscriptions", requireAuth, async (req, res) => {

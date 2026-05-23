@@ -254,32 +254,55 @@ async function getArtistsMetadata(userId: number, ids: string[]): Promise<Map<st
 }
 
 /**
- * Normalize Spotify's hyper-specific micro-genres into a smaller set of
- * recognizable buckets. "chillwave", "dream pop", "shoegaze" → "indie".
- * "trap", "drill", "southern hip hop" → "hip hop". Etc.
+ * Parent-bucket mapping for Spotify's hyper-granular genre taxonomy.
+ * Spotify returns things like "viral pop", "australian indie rock",
+ * "chillhop", "phonk" — we collapse to ~14 parent buckets the UI can
+ * actually display in a grid.
  *
- * Order matters — first match wins.
+ * Order matters: rules earlier win when a string matches multiple
+ * (e.g. "trap soul" → Hip-hop, not R&B).
  */
-function bucketGenre(raw: string): string {
+const GENRE_RULES: Array<[RegExp, string]> = [
+  [/reggae|dub\b|dancehall|ska\b|roots/, "Reggae"],
+  [/hip hop|hip-hop|hiphop|\brap\b|trap|drill|grime|phonk|boom bap/, "Hip-hop"],
+  [/r&b|rnb|soul|neo soul|neo-soul|funk/, "R&B / Soul"],
+  [/edm|house|techno|trance|drum and bass|dnb|dubstep|electro|bass|tropical|garage|breakbeat|hardstyle|future bass|dance pop/, "Electronic"],
+  [/lo-fi|lofi|chillhop|chillwave|ambient|downtempo|chill\b/, "Ambient / Lo-fi"],
+  [/indie|shoegaze|dream pop|bedroom|jangle/, "Indie"],
+  [/punk|grunge|metal|emo|post-hardcore|hardcore|metalcore/, "Rock"],
+  [/\brock\b|alternative/, "Rock"],
+  [/folk|americana|country|bluegrass|singer-songwriter/, "Folk / Country"],
+  [/jazz|bebop|swing|bossa|fusion/, "Jazz"],
+  [/classical|orchestra|baroque|romantic|opera|symphony|piano/, "Classical"],
+  [/latin|reggaeton|salsa|cumbia|bachata|mariachi|bossa nova/, "Latin"],
+  [/afrobeat|amapiano|highlife|k-pop|j-pop|c-pop|bollywood|world/, "World"],
+  [/\bpop\b/, "Pop"], // last so it doesn't swallow dream pop / indie pop / dance pop
+];
+
+function bucketGenreOne(raw: string): string | null {
   const g = raw.toLowerCase();
-  const rules: Array<[RegExp, string]> = [
-    [/reggae|dub|dancehall|ska/, "Reggae"],
-    [/hip hop|hip-hop|hiphop|rap|trap|drill|grime/, "Hip-hop"],
-    [/r&b|rnb|soul|neo soul|neo-soul/, "R&B / Soul"],
-    [/edm|house|techno|trance|drum and bass|dnb|dubstep|electro|bass|tropical/, "Electronic"],
-    [/indie|shoegaze|dream pop|chillwave|bedroom/, "Indie"],
-    [/rock|punk|grunge|metal|emo|post-hardcore/, "Rock"],
-    [/pop/, "Pop"],
-    [/folk|americana|country|bluegrass/, "Folk / Country"],
-    [/jazz|bebop|swing|bossa/, "Jazz"],
-    [/classical|orchestra|baroque|romantic|opera/, "Classical"],
-    [/lo-fi|lofi|chill|ambient|downtempo/, "Ambient / Lo-fi"],
-    [/latin|reggaeton|salsa|cumbia|bachata/, "Latin"],
-    [/world|afrobeat|highlife|k-pop|j-pop/, "World"],
-  ];
-  for (const [re, label] of rules) if (re.test(g)) return label;
-  // Title-case fallback for unknown buckets
-  return g.replace(/\b\w/g, c => c.toUpperCase());
+  for (const [re, label] of GENRE_RULES) if (re.test(g)) return label;
+  return null;
+}
+
+function bucketGenre(raw: string): string {
+  return bucketGenreOne(raw) ?? raw.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Try every genre the artist has tagged until one maps to a known
+ * parent bucket. This is the key fix: Spotify often lists the most
+ * specific subgenre first ("australian indie rock") which our regex
+ * doesn't recognize, but the second or third entry ("indie rock")
+ * usually does. Falls back to the first genre title-cased.
+ */
+function bucketGenres(rawGenres: string[]): string {
+  for (const g of rawGenres) {
+    const hit = bucketGenreOne(g);
+    if (hit) return hit;
+  }
+  if (rawGenres.length === 0) return "Unknown";
+  return rawGenres[0].toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
 export interface GenreBucket {
@@ -318,8 +341,8 @@ async function rollupByGenre(
     if (!primary) continue;
     const am = meta.get(primary.id);
     const rawGenres = am?.genres?.length ? am.genres : ["Unknown"];
-    // Use the first genre as the primary bucket
-    const genre = bucketGenre(rawGenres[0]);
+    // Try every genre until one maps to a known parent bucket
+    const genre = bucketGenres(rawGenres);
 
     let b = buckets.get(genre);
     if (!b) {

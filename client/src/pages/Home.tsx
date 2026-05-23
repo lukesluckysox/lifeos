@@ -1,9 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { TrendingUp, TrendingDown, MapPin, Calendar as CalIcon, Music as MusicIcon, Tv, LineChart, ArrowUpRight } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { useState } from "react";
+import { TrendingUp, TrendingDown, MapPin, Calendar as CalIcon, Music as MusicIcon, Tv, LineChart, ArrowUpRight, Check, X } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useMode } from "@/components/ModeProvider";
 import { useLocation as useCity } from "@/components/LocationProvider";
+import { useAuth } from "@/components/AuthProvider";
+import { useCountUp } from "@/hooks/useCountUp";
 
 /* ---------- Types ---------- */
 
@@ -40,6 +43,10 @@ interface CatalogResp { source: string; items: CatalogItem[]; }
 export default function Home() {
   const { mode, withMode } = useMode();
   const { city } = useCity();
+  const { user } = useAuth();
+  const firstName = (user?.displayName || "").split(" ")[0] || "there";
+  const hour = new Date().getHours();
+  const partOfDay = hour < 5 ? "late night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "tonight";
 
   const { data: portfolio } = useQuery<PortfolioResp>({
     queryKey: ["/api/portfolio", mode],
@@ -88,18 +95,45 @@ export default function Home() {
   /* Watch: top 3 from catalog */
   const topWatch = (catalog?.items ?? []).slice(0, 3);
 
+  /* Hero ticker numbers */
+  const trackCount = (musicRecent?.tracks ?? []).length;
+  const showCount = upcomingConcerts.length;
+
+  /* Onboarding status (only fetched when user is signed in) */
+  const { data: onboarding } = useQuery<{
+    steps: { id: string; label: string; done: boolean; href?: string }[];
+    completedCount: number;
+    totalCount: number;
+    hidden: boolean;
+  }>({
+    queryKey: ["/api/onboarding-status"],
+    queryFn: async () => (await apiRequest("GET", "/api/onboarding-status")).json(),
+    enabled: !!user,
+  });
+
   return (
     <div className="space-y-10 animate-fade-in">
-      {/* ---- Editorial intro ---- */}
-      <section className="pt-2">
-        <div className="eyebrow mb-4">
-          {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          {mode === "demo" && <span className="ml-2 text-gold">· demo mode</span>}
-        </div>
-        <h1 className="font-display text-[clamp(2rem,4vw,3.25rem)] leading-[1.02] tracking-tight max-w-3xl">
-          The <span className="text-teal italic">state</span> of you, today.
-        </h1>
-      </section>
+      {/* ---- First-run checklist (auto-hides once dismissed) ---- */}
+      {onboarding && !onboarding.hidden && (
+        <OnboardingChecklist
+          steps={onboarding.steps}
+          completedCount={onboarding.completedCount}
+          totalCount={onboarding.totalCount}
+        />
+      )}
+
+      {/* ---- Hero greeting ---- */}
+      <HeroGreeting
+        firstName={firstName}
+        partOfDay={partOfDay}
+        dateLabel={new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+        mode={mode}
+        dayChange={dayChange}
+        dayChangePct={dayChangePct}
+        trackCount={trackCount}
+        showCount={showCount}
+        city={city}
+      />
 
       <div className="hairline" />
 
@@ -251,10 +285,30 @@ export default function Home() {
       </section>
 
       <div className="hairline" />
-      <footer className="pb-12">
-        <div className="flex items-baseline gap-3">
+      <footer className="pb-12 space-y-3">
+        <div className="flex items-baseline gap-3 flex-wrap">
           <span className="font-display text-xl text-muted-foreground italic">Radius</span>
           <span className="eyebrow">a personal command room</span>
+        </div>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+          <Link href="/whats-new">
+            <span className="hover:text-teal transition-colors cursor-pointer" data-testid="link-footer-whats-new">
+              What’s new
+            </span>
+          </Link>
+          <span className="text-muted-foreground/40">·</span>
+          <a
+            href="https://traces.up.railway.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-teal transition-colors inline-flex items-center gap-1"
+            data-testid="link-footer-atlas"
+          >
+            Atlas · the sibling app
+            <ArrowUpRight size={10} />
+          </a>
+          <span className="text-muted-foreground/40">·</span>
+          <span>v0.4 · made in Hawaii</span>
         </div>
       </footer>
     </div>
@@ -331,6 +385,130 @@ function Sparkline({ points, positive }: { points: { t: string; v: number }[]; p
       <path d={area} fill={fillColor} />
       <path d={line} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+function OnboardingChecklist({
+  steps, completedCount, totalCount,
+}: {
+  steps: { id: string; label: string; done: boolean; href?: string }[];
+  completedCount: number;
+  totalCount: number;
+}) {
+  const [dismissing, setDismissing] = useState(false);
+  const allCoreDone = steps.filter(s => s.id !== "dismiss").every(s => s.done);
+  const pct = Math.round((completedCount / totalCount) * 100);
+
+  const dismiss = async () => {
+    setDismissing(true);
+    try {
+      await apiRequest("POST", "/api/auth/onboarding-completed");
+      await queryClient.invalidateQueries({ queryKey: ["/api/onboarding-status"] });
+    } catch {
+      setDismissing(false);
+    }
+  };
+
+  return (
+    <section
+      className="rounded-xl border border-teal/20 bg-teal/5 p-5"
+      data-testid="section-home-onboarding"
+    >
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-teal mb-1">Getting started · {pct}%</div>
+          <h2 className="font-display text-lg leading-tight">
+            {allCoreDone ? "You’re all set — dismiss this?" : "Connect a few things to make Radius yours."}
+          </h2>
+        </div>
+        <button
+          type="button"
+          onClick={dismiss}
+          disabled={dismissing}
+          className="text-muted-foreground hover:text-foreground transition-colors"
+          data-testid="button-onboarding-dismiss"
+          title="Dismiss"
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <ul className="space-y-2">
+        {steps.filter(s => s.id !== "dismiss").map((s) => (
+          <li key={s.id} className="flex items-center gap-3 text-sm">
+            <span
+              className={`inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0 ${
+                s.done ? "bg-teal text-black" : "bg-card border border-border"
+              }`}
+              data-testid={`onboarding-step-${s.id}-${s.done ? "done" : "pending"}`}
+            >
+              {s.done && <Check size={12} />}
+            </span>
+            {s.done ? (
+              <span className="text-muted-foreground line-through">{s.label}</span>
+            ) : s.href ? (
+              <Link href={s.href}>
+                <span className="hover:text-teal transition-colors cursor-pointer" data-testid={`link-onboarding-${s.id}`}>
+                  {s.label}
+                </span>
+              </Link>
+            ) : (
+              <span>{s.label}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function HeroGreeting({
+  firstName, partOfDay, dateLabel, mode, dayChange, dayChangePct, trackCount, showCount, city,
+}: {
+  firstName: string;
+  partOfDay: string;
+  dateLabel: string;
+  mode: string;
+  dayChange: number;
+  dayChangePct: number;
+  trackCount: number;
+  showCount: number;
+  city: string;
+}) {
+  const positive = dayChange >= 0;
+  const animatedChange = useCountUp(Math.abs(dayChange));
+  return (
+    <section className="pt-2" data-testid="section-home-hero">
+      <div className="eyebrow mb-4">
+        {dateLabel}
+        {mode === "demo" && <span className="ml-2 text-gold">· demo mode</span>}
+      </div>
+      <h1 className="font-display text-[clamp(1.875rem,4vw,3rem)] leading-[1.05] tracking-tight max-w-3xl">
+        Good {partOfDay}, <span className="text-teal italic">{firstName}</span>.
+      </h1>
+      <p className="mt-3 text-base text-muted-foreground max-w-2xl leading-relaxed" data-testid="text-home-hero-summary">
+        Your portfolio is{" "}
+        <span className={`font-mono tabular ${positive ? "text-teal" : "text-rose"}`}>
+          {positive ? "+" : "−"}${Math.round(animatedChange).toLocaleString()}
+        </span>{" "}
+        <span className={`font-mono tabular ${positive ? "text-teal" : "text-rose"}`}>
+          ({positive ? "+" : ""}{dayChangePct.toFixed(2)}%)
+        </span>{" "}
+        today.
+        {trackCount > 0 && (
+          <>
+            {" "}You’ve played{" "}
+            <span className="text-foreground tabular">{trackCount}</span>{" "}
+            track{trackCount === 1 ? "" : "s"} recently.
+          </>
+        )}
+        {showCount > 0 && (
+          <>
+            {" "}<span className="text-foreground tabular">{showCount}</span>{" "}
+            show{showCount === 1 ? "" : "s"} coming up in {city}.
+          </>
+        )}
+      </p>
+    </section>
   );
 }
 

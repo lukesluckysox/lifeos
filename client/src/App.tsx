@@ -17,6 +17,8 @@ import Events from "@/pages/Events";
 import Places from "@/pages/Places";
 import Finance from "@/pages/Finance";
 import Saved from "@/pages/Saved";
+import WhatsNew from "@/pages/WhatsNew";
+import Settings from "@/pages/Settings";
 import Landing from "@/pages/Landing";
 import NotFound from "@/pages/not-found";
 import { useEffect } from "react";
@@ -67,6 +69,8 @@ function AppRouter() {
         <Route path="/places"><ErrorBoundary label="Places page"><Places /></ErrorBoundary></Route>
         <Route path="/finance"><ErrorBoundary label="Finance page"><Finance /></ErrorBoundary></Route>
         <Route path="/saved"><ErrorBoundary label="Saved page"><Saved /></ErrorBoundary></Route>
+        <Route path="/whats-new"><ErrorBoundary label="What's New page"><WhatsNew /></ErrorBoundary></Route>
+        <Route path="/settings"><ErrorBoundary label="Settings page"><Settings /></ErrorBoundary></Route>
         {/* Legacy redirects */}
         <Route path="/film">{() => <Redirect to="/watch?tab=film" />}</Route>
         <Route path="/food">{() => <Redirect to="/places?tab=food" />}</Route>

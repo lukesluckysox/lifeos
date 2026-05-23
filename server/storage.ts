@@ -342,9 +342,33 @@ export interface IStorage {
   savePlaidItem(userId: number, item: { itemId: string; accessToken: string; institutionName?: string }): Promise<PlaidItem>;
   getPlaidItems(userId: number): Promise<PlaidItem[]>;
   deletePlaidItem(userId: number, itemId: string): Promise<{ changes: number }>;
+
+  /**
+   * Permanently delete a user and all of their associated data.
+   * Used by the Settings > Delete account flow. Returns the number of
+   * top-level rows removed (1 if the user existed, 0 otherwise).
+   */
+  deleteUserAndAllData(userId: number): Promise<{ changes: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
+  async deleteUserAndAllData(userId: number): Promise<{ changes: number }> {
+    // Order matters: delete children before the user row. Sessions and
+    // secrets are keyed by user_id, holdings/watchlist/etc. likewise.
+    db.delete(sessions).where(eq(sessions.userId, userId)).run();
+    db.delete(plaidItems).where(eq(plaidItems.userId, userId)).run();
+    db.delete(ratings).where(eq(ratings.userId, userId)).run();
+    db.delete(holdings).where(eq(holdings.userId, userId)).run();
+    db.delete(watchlist).where(eq(watchlist.userId, userId)).run();
+    db.delete(subscriptions).where(eq(subscriptions.userId, userId)).run();
+    db.delete(foodSpots).where(eq(foodSpots.userId, userId)).run();
+    db.delete(recFeedback).where(eq(recFeedback.userId, userId)).run();
+    db.delete(userItems).where(eq(userItems.userId, userId)).run();
+    db.delete(secrets).where(eq(secrets.userId, userId)).run();
+    const r = db.delete(users).where(eq(users.id, userId)).run();
+    return { changes: r.changes };
+  }
+
   async getUser(id: number): Promise<User | undefined> {
     return db.select().from(users).where(eq(users.id, id)).get();
   }
