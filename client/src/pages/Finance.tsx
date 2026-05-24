@@ -265,7 +265,6 @@ function FinancePortfolio() {
           <div className="flex gap-8">
             <Metric label="Plaid" value={`$${plaidValue.toLocaleString(undefined,{maximumFractionDigits:0})}`} sub={`${portfolio?.plaid?.positions ?? 0} positions`} />
             <Metric label="Manual" value={`$${manualValue.toLocaleString(undefined,{maximumFractionDigits:0})}`} sub={`${manualHoldings.length} entries`} />
-            <Metric label="Lifetime" value={totalCost ? `${blendedGainPct >= 0 ? "+" : ""}${blendedGainPct.toFixed(1)}%` : "—"} sub="blended" />
           </div>
         </div>
       </section>
@@ -335,21 +334,12 @@ function FinancePortfolio() {
               <div className="h-32 grid place-items-center text-xs text-muted-foreground">Loading…</div>
             ) : indexQuote ? (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="eyebrow mb-1">{indexSym} YTD</div>
-                    <div className={`font-display text-2xl tabular ${indexQuote.ytdReturnPct >= 0 ? "text-teal" : "text-rose"}`}>
-                      {indexQuote.ytdReturnPct >= 0 ? "+" : ""}{indexQuote.ytdReturnPct.toFixed(2)}%
-                    </div>
-                    <div className="font-mono text-[10px] text-muted-foreground mt-1">@ ${indexQuote.currentPrice.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+                <div>
+                  <div className="eyebrow mb-1">{indexSym} YTD</div>
+                  <div className={`font-display text-2xl tabular ${indexQuote.ytdReturnPct >= 0 ? "text-teal" : "text-rose"}`}>
+                    {indexQuote.ytdReturnPct >= 0 ? "+" : ""}{indexQuote.ytdReturnPct.toFixed(2)}%
                   </div>
-                  <div>
-                    <div className="eyebrow mb-1">You · blended</div>
-                    <div className={`font-display text-2xl tabular ${blendedGainPct >= 0 ? "text-teal" : "text-rose"}`}>
-                      {totalCost ? `${blendedGainPct >= 0 ? "+" : ""}${blendedGainPct.toFixed(2)}%` : "—"}
-                    </div>
-                    <div className="font-mono text-[10px] text-muted-foreground mt-1">lifetime gain</div>
-                  </div>
+                  <div className="font-mono text-[10px] text-muted-foreground mt-1">@ ${indexQuote.currentPrice.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
                 </div>
                 <div className="pt-3 border-t border-border/60">
                   <div className="eyebrow mb-1">{indexSym} 1y</div>
@@ -386,17 +376,11 @@ function FinancePortfolio() {
                 </>
               )}
             </p>
-            <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
-              {indexQuote && totalCost > 0 && (
-                <>
-                  Your blended return is{" "}
-                  {blendedGainPct - indexQuote.ytdReturnPct >= 0
-                    ? `ahead of ${indexSym} YTD by ${(blendedGainPct - indexQuote.ytdReturnPct).toFixed(2)} pts.`
-                    : `trailing ${indexSym} YTD by ${(indexQuote.ytdReturnPct - blendedGainPct).toFixed(2)} pts.`}
-                </>
-              )}
-              {portfolio?.source === "demo" && " This is sample data for sharing."}
-            </p>
+            {portfolio?.source === "demo" && (
+              <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
+                This is sample data for sharing.
+              </p>
+            )}
             <div className="mt-5 pt-5 border-t border-border/40">
               <Link href="/finance?tab=advisor" data-testid="link-to-advisor">
                 <span className="inline-flex items-center gap-1.5 text-xs font-mono text-teal hover:underline underline-offset-2 cursor-pointer">
