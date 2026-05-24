@@ -1,5 +1,6 @@
 import { MapPin, Compass, Route, Calendar, Sparkles, ExternalLink, Moon, Thermometer, ChevronLeft, ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { TopPickPill } from "@/components/TopPickPill";
 import { useState, useMemo } from "react";
 import { PathsMap, typeColor, typeLabel } from "@/components/PathsMap";
 import { SectionHeader } from "@/components/SectionHeader";
@@ -171,6 +172,9 @@ function PlacesMain() {
               curated
             </span>
           )}
+        </div>
+        <div className="mt-4">
+          <TopPickPill domain="place" />
         </div>
       </section>
 

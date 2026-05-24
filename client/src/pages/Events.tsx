@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { TopPickPill } from "@/components/TopPickPill";
 import { MapPin, Calendar, Music as MusicIcon, Trophy, Theater, Film as FilmIcon, LocateFixed, Loader2 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { RatingBar } from "@/components/RatingBar";
@@ -26,11 +27,28 @@ type Cat = typeof CATEGORIES[number];
 
 const POPULAR_CITIES = ["Honolulu", "Los Angeles", "San Francisco", "New York", "Tokyo", "Lisbon"];
 
+interface CityHit {
+  name: string;
+  region: string;
+  country: string;
+  cc: string;
+  display: string;
+  lat?: number;
+  lon?: number;
+}
+
 export default function Events() {
   const [city, setCity] = useState("Honolulu");
   const [draft, setDraft] = useState("Honolulu");
   const [cat, setCat] = useState<Cat>("All");
   const [geoStatus, setGeoStatus] = useState<"idle" | "locating" | "ok" | "denied">("idle");
+
+  // City search autocomplete state
+  const [hits, setHits] = useState<CityHit[]>([]);
+  const [hitsLoading, setHitsLoading] = useState(false);
+  const [hitsOpen, setHitsOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const searchSeq = useRef(0);
 
   // Auto-detect on mount
   useEffect(() => {
@@ -89,9 +107,49 @@ export default function Events() {
       .sort((a, b) => b.total - a.total);
   }, [data, ratings, city]);
 
+  // ── City search (debounced Photon proxy via /api/places/city-search) ────────
+  // Re-runs on every keystroke; aborts stale responses via a monotonic seq.
+  useEffect(() => {
+    const term = draft.trim();
+    if (term.length < 2) {
+      setHits([]);
+      setHitsLoading(false);
+      return;
+    }
+    const mySeq = ++searchSeq.current;
+    setHitsLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await apiRequest("GET", `/api/places/city-search?q=${encodeURIComponent(term)}`);
+        const data: { items?: CityHit[] } = await res.json();
+        if (mySeq !== searchSeq.current) return;
+        setHits(Array.isArray(data.items) ? data.items : []);
+        setActiveIdx(0);
+      } catch {
+        if (mySeq === searchSeq.current) setHits([]);
+      } finally {
+        if (mySeq === searchSeq.current) setHitsLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [draft]);
+
+  const commitCity = (next: string) => {
+    const v = next.trim();
+    if (!v) return;
+    setCity(v);
+    setDraft(v);
+    setHitsOpen(false);
+  };
+
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setCity(draft);
+    // If the dropdown has a highlighted hit, commit that; else free-text.
+    if (hitsOpen && hits[activeIdx]) {
+      commitCity(hits[activeIdx].name);
+    } else {
+      commitCity(draft);
+    }
   };
 
   return (
@@ -104,6 +162,9 @@ export default function Events() {
         <p className="mt-4 text-sm text-muted-foreground max-w-xl leading-relaxed">
           Search any city. Each event is scored against your liked artists, places, and recency window.
         </p>
+        <div className="mt-4">
+          <TopPickPill domain="event" />
+        </div>
       </section>
 
       {/* Location bar */}
@@ -114,10 +175,82 @@ export default function Events() {
             <input
               data-testid="input-city"
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="City…"
-              className="w-full h-10 pl-9 pr-3 rounded-md bg-secondary/40 border border-border text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal"
+              onChange={(e) => { setDraft(e.target.value); setHitsOpen(true); }}
+              onFocus={() => setHitsOpen(true)}
+              onBlur={() => {
+                // Delay so click on a dropdown item lands before close.
+                setTimeout(() => setHitsOpen(false), 150);
+              }}
+              onKeyDown={(e) => {
+                if (!hitsOpen || hits.length === 0) return;
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setActiveIdx((i) => Math.min(i + 1, hits.length - 1));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setActiveIdx((i) => Math.max(i - 1, 0));
+                } else if (e.key === "Escape") {
+                  setHitsOpen(false);
+                }
+              }}
+              placeholder="Search any city…"
+              autoComplete="off"
+              className="w-full h-10 pl-9 pr-9 rounded-md bg-secondary/40 border border-border text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal"
             />
+            {hitsLoading && (
+              <Loader2
+                size={12}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground animate-spin"
+                data-testid="icon-city-search-loading"
+              />
+            )}
+
+            {/* Autocomplete dropdown — absolute over the page so it can
+                overflow the form row without pushing layout around. */}
+            {hitsOpen && hits.length > 0 && (
+              <ul
+                className="absolute left-0 right-0 top-full mt-1.5 z-20 max-h-72 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg divide-y divide-border/40"
+                data-testid="list-city-results"
+              >
+                {hits.map((h, i) => (
+                  <li key={`${h.name}-${h.region}-${h.country}-${i}`}>
+                    <button
+                      type="button"
+                      // onMouseDown (not onClick) so it fires before the input's blur.
+                      onMouseDown={(e) => { e.preventDefault(); commitCity(h.name); }}
+                      onMouseEnter={() => setActiveIdx(i)}
+                      data-testid={`option-city-${h.name.toLowerCase().replace(/\s+/g, "-")}-${i}`}
+                      className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-3 transition ${
+                        i === activeIdx ? "bg-accent text-accent-foreground" : "hover:bg-accent/60"
+                      }`}
+                    >
+                      <span className="truncate">
+                        <span className="text-foreground">{h.name}</span>
+                        {h.region && (
+                          <span className="text-muted-foreground">, {h.region}</span>
+                        )}
+                        {!h.region && h.country && (
+                          <span className="text-muted-foreground">, {h.country}</span>
+                        )}
+                      </span>
+                      <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70">
+                        {h.cc || h.country.slice(0, 3).toUpperCase()}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* No-results hint — only after a real query with 0 matches. */}
+            {hitsOpen && !hitsLoading && draft.trim().length >= 2 && hits.length === 0 && (
+              <div
+                className="absolute left-0 right-0 top-full mt-1.5 z-20 rounded-md border border-border bg-popover px-3 py-2 text-[11px] text-muted-foreground shadow-lg"
+                data-testid="text-city-no-results"
+              >
+                No matches. Press Search to use “{draft.trim()}” anyway.
+              </div>
+            )}
           </div>
           <button
             type="submit"
@@ -142,7 +275,7 @@ export default function Events() {
             <button
               key={c}
               data-testid={`button-city-${c.toLowerCase().replace(/\s+/g, "-")}`}
-              onClick={() => { setCity(c); setDraft(c); }}
+              onClick={() => commitCity(c)}
               className={`text-[11px] font-mono uppercase tracking-wider px-2.5 py-1 rounded border transition-colors ${
                 city === c
                   ? "border-teal text-teal bg-secondary/40"

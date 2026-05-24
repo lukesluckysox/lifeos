@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { useState } from "react";
 import { TrendingUp, TrendingDown, MapPin, Calendar as CalIcon, Music as MusicIcon, Tv, LineChart, ArrowUpRight, Check, X } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { TopPickPill, type TopPickDomain } from "@/components/TopPickPill";
 import { useMode } from "@/components/ModeProvider";
 import { useLocation as useCity } from "@/components/LocationProvider";
 import { useAuth } from "@/components/AuthProvider";
@@ -141,6 +142,7 @@ export default function Home() {
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
 
         {/* ===== Finance ===== */}
+        <HomeCardWithPill domain="stock">
         <DashboardCard
           href="/finance"
           icon={<LineChart size={14} className="text-teal" />}
@@ -180,8 +182,10 @@ export default function Home() {
             </div>
           )}
         </DashboardCard>
+        </HomeCardWithPill>
 
         {/* ===== Places ===== */}
+        <HomeCardWithPill domain="place">
         <DashboardCard
           href="/places"
           icon={<MapPin size={14} className="text-teal" />}
@@ -210,8 +214,10 @@ export default function Home() {
             <EmptyHint>Add a place or change city.</EmptyHint>
           )}
         </DashboardCard>
+        </HomeCardWithPill>
 
         {/* ===== Events ===== */}
+        <HomeCardWithPill domain="event">
         <DashboardCard
           href="/events"
           icon={<CalIcon size={14} className="text-teal" />}
@@ -235,8 +241,10 @@ export default function Home() {
             <EmptyHint>No shows yet. Add an artist to follow.</EmptyHint>
           )}
         </DashboardCard>
+        </HomeCardWithPill>
 
         {/* ===== Music ===== */}
+        <HomeCardWithPill domain="artist">
         <DashboardCard
           href="/music"
           icon={<MusicIcon size={14} className="text-teal" />}
@@ -263,8 +271,10 @@ export default function Home() {
             <EmptyHint>Connect Spotify for live listening.</EmptyHint>
           )}
         </DashboardCard>
+        </HomeCardWithPill>
 
         {/* ===== Watch ===== */}
+        <HomeCardWithPill domain="show">
         <DashboardCard
           href="/watch"
           icon={<Tv size={14} className="text-teal" />}
@@ -289,6 +299,7 @@ export default function Home() {
             <EmptyHint>Rate a few titles to seed your taste.</EmptyHint>
           )}
         </DashboardCard>
+        </HomeCardWithPill>
 
       </section>
 
@@ -318,6 +329,23 @@ export default function Home() {
 }
 
 /* ---------- Sub-components ---------- */
+
+// Wraps a Home dashboard card with its TOP pick pill below.
+// Keeps the grid happy: each child of the grid is still a single column item.
+function HomeCardWithPill({
+  domain,
+  children,
+}: {
+  domain: TopPickDomain;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 min-w-0">
+      {children}
+      <TopPickPill domain={domain} className="self-start max-w-full" />
+    </div>
+  );
+}
 
 function DashboardCard({
   href, icon, eyebrow, children, testId,

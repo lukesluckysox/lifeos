@@ -1,6 +1,6 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Sun, Moon, Search, Music, MapPin, LineChart, Home as HomeIcon, Menu, X, Tv, Calendar, BellOff, Bell, Bookmark, RefreshCw, Settings } from "lucide-react";
+import { Sun, Moon, Search, Music, MapPin, LineChart, Home as HomeIcon, Menu, X, Tv, Calendar, BellOff, Bell, Bookmark, RefreshCw, Settings, Loader2 } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { useTheme } from "./ThemeProvider";
 import { useMode } from "./ModeProvider";
@@ -8,6 +8,166 @@ import { useQuietMode, QUIET_DOMAIN_LABELS, type QuietDomain } from "./QuietMode
 import { useLocation as useCity } from "./LocationProvider";
 import { Input } from "@/components/ui/input";
 import { useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+
+/* ─────────────────────────────────────────────────────────────────────── */
+/* CitySearch — real geocoded city autocomplete                           */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+interface CityHit {
+  name: string;
+  region: string;
+  country: string;
+  cc: string;
+  display: string;
+  lat?: number;
+  lon?: number;
+}
+
+function CitySearch({
+  initial,
+  onPick,
+  current,
+}: {
+  initial: string;
+  onPick: (city: string) => void;
+  current: string;
+}) {
+  const [q, setQ] = useState(initial);
+  const [hits, setHits] = useState<CityHit[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const seq = useRef(0);
+
+  // Debounced fetch — 250ms after last keystroke. Aborts stale requests.
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) {
+      setHits([]);
+      setLoading(false);
+      return;
+    }
+    const mySeq = ++seq.current;
+    setLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await apiRequest("GET", `/api/places/city-search?q=${encodeURIComponent(term)}`);
+        const data: { items?: CityHit[] } = await res.json();
+        // Drop result if a newer request started since.
+        if (mySeq !== seq.current) return;
+        setHits(Array.isArray(data.items) ? data.items : []);
+        setActiveIdx(0);
+      } catch {
+        if (mySeq === seq.current) setHits([]);
+      } finally {
+        if (mySeq === seq.current) setLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const commit = (hit?: CityHit) => {
+    if (hit) {
+      onPick(hit.name);
+      return;
+    }
+    // Free-text fallback — if there's a typed value and no hit selected, accept as-is.
+    const term = q.trim();
+    if (term) onPick(term);
+  };
+
+  return (
+    <div>
+      <div className="eyebrow mb-2">Set city</div>
+      <div className="relative">
+        <Input
+          data-testid="input-location-city"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActiveIdx((i) => Math.min(i + 1, Math.max(hits.length - 1, 0)));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActiveIdx((i) => Math.max(i - 1, 0));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              commit(hits[activeIdx]);
+            }
+          }}
+          placeholder="Search any city…"
+          autoFocus
+          className="h-8 text-sm pr-7"
+        />
+        {loading && (
+          <Loader2
+            size={12}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground animate-spin"
+            data-testid="icon-city-loading"
+          />
+        )}
+      </div>
+
+      {/* Results list */}
+      {hits.length > 0 && (
+        <ul
+          className="mt-2 max-h-60 overflow-y-auto rounded border border-border bg-popover divide-y divide-border/40"
+          data-testid="list-city-results"
+        >
+          {hits.map((h, i) => (
+            <li key={`${h.name}-${h.region}-${h.country}`}>
+              <button
+                type="button"
+                onClick={() => commit(h)}
+                onMouseEnter={() => setActiveIdx(i)}
+                data-testid={`option-city-${h.name.toLowerCase().replace(/\s+/g, "-")}-${i}`}
+                className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 transition ${
+                  i === activeIdx ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                }`}
+              >
+                <span className="truncate">
+                  <span className="text-foreground">{h.name}</span>
+                  {h.region && <span className="text-muted-foreground">, {h.region}</span>}
+                </span>
+                <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70">
+                  {h.cc || h.country.slice(0, 3).toUpperCase()}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Empty result state — only when the user typed something but nothing matched. */}
+      {!loading && q.trim().length >= 2 && hits.length === 0 && (
+        <div
+          className="mt-2 rounded border border-border/60 bg-card/30 px-2.5 py-2 text-[11px] text-muted-foreground"
+          data-testid="text-city-no-results"
+        >
+          No matches. Press Enter to use “{q.trim()}” anyway.
+        </div>
+      )}
+
+      {/* Pinned quick-picks — only shown when input is empty, so they don't crowd the search. */}
+      {q.trim().length < 2 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {["Honolulu", "Los Angeles", "New York", "San Francisco", "Tokyo"].map((c) => (
+            <button
+              key={c}
+              type="button"
+              data-testid={`button-location-quick-${c.toLowerCase().replace(/\s+/g, "-")}`}
+              onClick={() => onPick(c)}
+              className={`text-[11px] rounded-full border px-2 py-1 transition ${current === c ? "border-teal bg-teal/10 text-teal" : "border-border hover:bg-accent"}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const NAV = [
   { href: "/", label: "Home", icon: HomeIcon },
@@ -186,51 +346,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <>
                       <div className="fixed inset-0 z-30" onClick={() => setLocOpen(false)} />
                       <div className="absolute right-0 mt-2 w-72 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg z-40 p-3" data-testid="menu-location">
-                        <div className="eyebrow mb-2">Set city</div>
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            const next = cityDraft.trim();
-                            if (next) {
-                              setCity(next);
-                              setLocOpen(false);
-                              queryClient.invalidateQueries();
-                            }
+                        <CitySearch
+                          initial={cityDraft}
+                          current={city}
+                          onPick={(c) => {
+                            setCity(c);
+                            setLocOpen(false);
+                            queryClient.invalidateQueries();
                           }}
-                          className="flex gap-2"
-                        >
-                          <Input
-                            data-testid="input-location-city"
-                            value={cityDraft}
-                            onChange={(e) => setCityDraft(e.target.value)}
-                            placeholder="City"
-                            autoFocus
-                            className="h-8 text-sm"
-                          />
-                          <button
-                            type="submit"
-                            data-testid="button-location-save"
-                            className="h-8 px-3 rounded-md border border-teal/40 bg-teal/15 text-teal text-xs font-mono uppercase tracking-wider hover:bg-teal/25"
-                          >
-                            Set
-                          </button>
-                        </form>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {["Honolulu", "Los Angeles", "New York", "San Francisco", "Tokyo"].map((c) => (
-                            <button
-                              key={c}
-                              data-testid={`button-location-quick-${c.toLowerCase().replace(/\s+/g, "-")}`}
-                              onClick={() => {
-                                setCity(c);
-                                setLocOpen(false);
-                                queryClient.invalidateQueries();
-                              }}
-                              className={`text-[11px] rounded-full border px-2 py-1 transition ${city === c ? "border-teal bg-teal/10 text-teal" : "border-border hover:bg-accent"}`}
-                            >
-                              {c}
-                            </button>
-                          ))}
-                        </div>
+                        />
                         <div className="mt-3 pt-3 border-t border-border/40 text-[10px] text-muted-foreground italic">
                           Shared across Food, Concerts, and Places.
                         </div>

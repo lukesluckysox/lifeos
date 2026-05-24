@@ -1011,6 +1011,174 @@ export async function registerRoutes(
   });
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Music Mood — Claude-derived mood from your listening genres
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // Why this exists:
+  //   Spotify deprecated /audio-features for new apps (Nov 2024) and even on
+  //   existing apps it's flaky. We synthesize a mood from the user's recent
+  //   genre rollup by asking Claude to score it on valence/energy.
+  //
+  // Output shape (kept tight — a stock-ticker style strip consumes it):
+  //   {
+  //     score:  0..100,          // composite mood index
+  //     valence: 0..100,         // happy ↔ somber
+  //     energy:  0..100,         // calm ↔ intense
+  //     label:   "Mellow Drift", // 1-3 word vibe label
+  //     delta:   number,         // vs prior cached score (− or +)
+  //     drivers: string[],       // 3-5 genres that pulled the score
+  //     asOf:    ISO string,
+  //   }
+  //
+  // Cache: per-user, TTL 6h. Mood doesn't shift hour to hour.
+
+  const moodCache = new Map<number, { ts: number; payload: any }>();
+  const MOOD_TTL_MS = 6 * 60 * 60 * 1000;
+
+  app.get("/api/music-mood", optionalAuth, async (req, res) => {
+    try {
+      const userId = req.user?.id;
+      const mode = (req.query.mode as string | undefined) === "demo" ? "demo" : "live";
+
+      // Demo: deterministic mellow-reggae fixture so the UI demos cleanly.
+      if (mode === "demo" || !userId) {
+        return res.json({
+          source: "demo",
+          score: 64, valence: 71, energy: 52,
+          label: "Sun-Warmed Drift",
+          delta: +3,
+          drivers: ["Reggae", "Hip-Hop", "Indie", "EDM"],
+          asOf: new Date().toISOString(),
+        });
+      }
+
+      const st = await Spotify.userStatus(userId);
+      if (!st.authorized) {
+        return res.json({ source: "unauthorized", reason: "connect-spotify" });
+      }
+
+      // Cache hit?
+      const hit = moodCache.get(userId);
+      if (hit && Date.now() - hit.ts < MOOD_TTL_MS && !req.query.refresh) {
+        return res.json(hit.payload);
+      }
+
+      // Pull recent + rotation genre rollups in parallel — they're our signal.
+      const [recent, rotation] = await Promise.all([
+        Spotify.getRecentByGenre(userId, 50).catch(() => ({ genres: [] as any[] })),
+        Spotify.getRotationByGenre(userId, 50).catch(() => ({ genres: [] as any[] })),
+      ]);
+
+      type GBucket = { genre: string; count: number };
+      const recentGenres: GBucket[] = (recent.genres || []).map((g: any) => ({ genre: g.genre, count: g.count }));
+      const rotationGenres: GBucket[] = (rotation.genres || []).map((g: any) => ({ genre: g.genre, count: g.count }));
+
+      if (!recentGenres.length && !rotationGenres.length) {
+        return res.json({ source: "no-data", reason: "no-listening-history" });
+      }
+
+      const anthropicKey = process.env.ANTHROPIC_API_KEY;
+      if (!anthropicKey) {
+        // Graceful fallback — naive heuristic so the strip isn't empty.
+        const top = [...rotationGenres, ...recentGenres].slice(0, 5).map(g => g.genre);
+        return res.json({
+          source: "heuristic",
+          score: 55, valence: 55, energy: 55,
+          label: "Steady Rotation",
+          delta: 0,
+          drivers: top,
+          asOf: new Date().toISOString(),
+          note: "ANTHROPIC_API_KEY not set — heuristic fallback.",
+        });
+      }
+
+      const system = `You score a person's musical mood from their recent listening genres.
+Output STRICT JSON only — no prose, no markdown fences.
+Shape: { "valence": 0-100, "energy": 0-100, "label": "1-3 word vibe", "drivers": ["genre", ...3-5 items] }
+- valence: 0 = somber/melancholic, 100 = euphoric/joyful
+- energy: 0 = calm/ambient, 100 = intense/aggressive
+- label: a poetic, evocative 1-3 word phrase capturing the vibe (e.g. "Sun-Warmed Drift", "Edgewise Burn", "Late Velvet")
+- drivers: the 3-5 input genres that most shaped your score, in descending influence
+Do not invent genres not in the input.`;
+
+      const userMsg = `Recent listening (last ~50 plays, by genre count):\n${recentGenres.slice(0,8).map(g => `- ${g.genre}: ${g.count}`).join("\n") || "  (none)"}\n\nOn rotation (top tracks short-term, by genre count):\n${rotationGenres.slice(0,8).map(g => `- ${g.genre}: ${g.count}`).join("\n") || "  (none)"}\n\nReturn JSON only.`;
+
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 250,
+          system,
+          messages: [{ role: "user", content: userMsg }],
+        }),
+      });
+
+      if (!r.ok) {
+        const errText = await r.text();
+        console.warn("[music-mood] Claude error:", errText.slice(0, 200));
+        // Fall back to heuristic so UI never sees a hard fail.
+        const top = [...rotationGenres, ...recentGenres].slice(0, 5).map(g => g.genre);
+        return res.json({
+          source: "heuristic-fallback",
+          score: 55, valence: 55, energy: 55,
+          label: "Steady Rotation",
+          delta: 0,
+          drivers: top,
+          asOf: new Date().toISOString(),
+        });
+      }
+
+      const j: any = await r.json();
+      const raw = j.content?.[0]?.text || "";
+      // Strip code fences if Claude added any.
+      const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+      let parsed: any;
+      try { parsed = JSON.parse(cleaned); } catch {
+        // Try grabbing the first {...} block.
+        const m = cleaned.match(/\{[\s\S]*\}/);
+        if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+      }
+      if (!parsed || typeof parsed.valence !== "number" || typeof parsed.energy !== "number") {
+        const top = [...rotationGenres, ...recentGenres].slice(0, 5).map(g => g.genre);
+        return res.json({
+          source: "parse-fallback",
+          score: 55, valence: 55, energy: 55,
+          label: "Steady Rotation",
+          delta: 0,
+          drivers: top,
+          asOf: new Date().toISOString(),
+        });
+      }
+
+      const valence = Math.max(0, Math.min(100, Math.round(parsed.valence)));
+      const energy = Math.max(0, Math.min(100, Math.round(parsed.energy)));
+      const score = Math.round((valence + energy) / 2);
+      const prior = hit?.payload?.score;
+      const delta = typeof prior === "number" ? score - prior : 0;
+
+      const payload = {
+        source: "claude",
+        score, valence, energy,
+        label: String(parsed.label || "Mixed").slice(0, 24),
+        delta,
+        drivers: Array.isArray(parsed.drivers) ? parsed.drivers.slice(0, 5).map((s: any) => String(s).slice(0, 24)) : [],
+        asOf: new Date().toISOString(),
+      };
+
+      moodCache.set(userId, { ts: Date.now(), payload });
+      res.json(payload);
+    } catch (e: any) {
+      console.error("music-mood error:", e.message);
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
   // User items
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -1130,6 +1298,86 @@ export async function registerRoutes(
       res.json({ ok: true, changes: r.changes });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // City search — Photon (Komoot) geocoder proxy
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // Photon is free, no API key, no rate limit drama. Returns OSM places.
+  // We proxy to:
+  //   1) avoid client-side CORS
+  //   2) filter to actual settlements (skip counties, farms, residential blocks)
+  //   3) cache hot queries for 1h (most users type the same big cities)
+  //
+  // Response shape — a flat array of city suggestions:
+  //   [{ name: "Honolulu", region: "Hawaii", country: "United States",
+  //     cc: "US", display: "Honolulu, Hawaii, United States",
+  //     lat: 21.30, lon: -157.86 }, ...]
+
+  const citySearchCache = new Map<string, { ts: number; items: any[] }>();
+  const CITY_TTL_MS = 60 * 60 * 1000; // 1h
+  const CITY_TYPES = new Set(["city", "town", "village", "suburb", "neighbourhood", "municipality", "locality"]);
+
+  app.get("/api/places/city-search", async (req, res) => {
+    try {
+      const q = (req.query.q as string | undefined)?.trim() || "";
+      if (q.length < 2) return res.json({ items: [] });
+
+      const key = q.toLowerCase();
+      const cached = citySearchCache.get(key);
+      if (cached && Date.now() - cached.ts < CITY_TTL_MS) {
+        return res.json({ items: cached.items, cached: true });
+      }
+
+      // limit=15 because we filter aggressively below; final UI shows ~8.
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=15&lang=en`;
+      const r = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!r.ok) {
+        return res.json({ items: [], error: `geocoder ${r.status}` });
+      }
+      const data: any = await r.json();
+      const feats: any[] = Array.isArray(data?.features) ? data.features : [];
+
+      const items = feats
+        .map((f) => {
+          const p = f.properties || {};
+          const coords = f.geometry?.coordinates || [];
+          return {
+            name: p.name as string,
+            region: (p.state || p.county || "") as string,
+            country: (p.country || "") as string,
+            cc: (p.countrycode || "") as string,
+            osmValue: p.osm_value as string,
+            lat: typeof coords[1] === "number" ? coords[1] : undefined,
+            lon: typeof coords[0] === "number" ? coords[0] : undefined,
+          };
+        })
+        .filter((x) => x.name && CITY_TYPES.has(x.osmValue))
+        // De-dupe by name+region+country so "Honolulu, Hawaii, US" doesn't appear twice.
+        .filter((x, i, arr) => arr.findIndex((y) => y.name === x.name && y.region === x.region && y.country === x.country) === i)
+        .slice(0, 8)
+        .map((x) => ({
+          name: x.name,
+          region: x.region,
+          country: x.country,
+          cc: x.cc,
+          display: [x.name, x.region, x.country].filter(Boolean).join(", "),
+          lat: x.lat,
+          lon: x.lon,
+        }));
+
+      citySearchCache.set(key, { ts: Date.now(), items });
+      // Trim cache if it gets large.
+      if (citySearchCache.size > 500) {
+        const oldest = [...citySearchCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
+        if (oldest) citySearchCache.delete(oldest);
+      }
+      res.json({ items });
+    } catch (e: any) {
+      console.warn("[city-search] error:", e?.message);
+      res.json({ items: [], error: e?.message || "unknown" });
     }
   });
 
@@ -2447,6 +2695,313 @@ export async function registerRoutes(
       res.json({ asOf: portfolio.asOf || new Date().toISOString(), totalValue, insights });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TOP picks — one hero pick per domain, shown as a pill
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // Strategy: heuristic picks the candidate from user data, then Claude
+  // writes a single-sentence "why" (cached 12h per user+domain).
+  //
+  // Domains:
+  //   stock   — highest-weight holding (live Plaid → manual fallback)
+  //   artist  — most-played artist from Spotify short_term top tracks
+  //   movie   — highest-rated unseen film candidate (TMDB trending ∩ not in ratings)
+  //   show    — same as movie but kind === "show"
+  //   place   — next upcoming Atlas path (or saved food spot)
+  //   event   — next upcoming Ticketmaster event in user's city
+  //
+  // Response shape:
+  //   { domain, title, subtitle?, image?, url?, why, source, asOf }
+  //   { domain, source: "empty", reason } when no candidate available.
+
+  type TopPick = {
+    domain: string;
+    title: string;
+    subtitle?: string;
+    image?: string;
+    url?: string;
+    why: string;
+    source: string;
+    asOf: string;
+  };
+
+  // cache key = `${userId}::${domain}`
+  const topPickCache = new Map<string, { ts: number; payload: TopPick | { domain: string; source: string; reason?: string } }>();
+  const TOP_PICK_TTL_MS = 12 * 60 * 60 * 1000;
+
+  async function claudeOneLiner(
+    domain: string,
+    candidate: { title: string; subtitle?: string; signal: string }
+  ): Promise<string> {
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) return candidate.signal; // graceful fallback — use the heuristic reason verbatim
+
+    const system = `You write a single-sentence personal recommendation reason. Output PLAIN TEXT only — no quotes, no markdown, no preamble. Max 14 words. Warm, specific, second-person ("because you…"). Reference the user's signal, not generic claims.`;
+    const userMsg = `Domain: ${domain}\nPick: ${candidate.title}${candidate.subtitle ? " — " + candidate.subtitle : ""}\nWhy heuristic picked it: ${candidate.signal}\n\nWrite the one-sentence reason.`;
+
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 80,
+          system,
+          messages: [{ role: "user", content: userMsg }],
+        }),
+      });
+      if (!r.ok) return candidate.signal;
+      const j: any = await r.json();
+      const text = (j.content?.[0]?.text || "").trim().replace(/^["“]|["”]$/g, "");
+      return text || candidate.signal;
+    } catch {
+      return candidate.signal;
+    }
+  }
+
+  app.get("/api/top-picks", optionalAuth, async (req, res) => {
+    try {
+      const domain = (req.query.domain as string | undefined) || "";
+      const validDomains = new Set(["stock", "artist", "movie", "show", "place", "event"]);
+      if (!validDomains.has(domain)) {
+        return res.status(400).json({ message: `Invalid domain. Use one of: ${[...validDomains].join(", ")}` });
+      }
+
+      const userId = req.user?.id;
+      const mode = (req.query.mode as string | undefined) === "demo" ? "demo" : "live";
+      const refresh = req.query.refresh === "1";
+
+      // ── Demo fallback fixtures so the UI looks alive without a connected account.
+      if (mode === "demo" || !userId) {
+        const demo: Record<string, TopPick> = {
+          stock: { domain, title: "NVDA", subtitle: "NVIDIA Corporation", why: "Your largest weighted position riding the AI buildout.", source: "demo", asOf: new Date().toISOString() },
+          artist: { domain, title: "Stick Figure", subtitle: "Reggae", why: "Heaviest in your rotation this month.", source: "demo", asOf: new Date().toISOString() },
+          movie: { domain, title: "Dune: Part Three", subtitle: "Sci-fi · 2026", why: "Tracks the slow-burn epics you've rated highly.", source: "demo", asOf: new Date().toISOString() },
+          show: { domain, title: "Severance", subtitle: "Apple TV+", why: "Matches your taste for cerebral thrillers.", source: "demo", asOf: new Date().toISOString() },
+          place: { domain, title: "Maku‘u Farmers Market", subtitle: "Pahoa, Hawaii", why: "On your Atlas path and matches your weekend rhythm.", source: "demo", asOf: new Date().toISOString() },
+          event: { domain, title: "Iya Terra at The Republik", subtitle: "Honolulu · Jun 14", why: "Reggae act you've followed, in your city.", source: "demo", asOf: new Date().toISOString() },
+        };
+        return res.json(demo[domain]);
+      }
+
+      const cacheKey = `${userId}::${domain}`;
+      if (!refresh) {
+        const hit = topPickCache.get(cacheKey);
+        if (hit && Date.now() - hit.ts < TOP_PICK_TTL_MS) {
+          return res.json(hit.payload);
+        }
+      }
+
+      // ── Heuristic candidate per domain ────────────────────────────────────
+      let candidate: { title: string; subtitle?: string; image?: string; url?: string; signal: string; source: string } | null = null;
+
+      if (domain === "stock") {
+        // Prefer Plaid live holdings; fall back to manual.
+        const plaidItems = await storage.getPlaidItems(userId).catch(() => [] as any[]);
+        const positions: { ticker: string; name?: string; value: number }[] = [];
+        for (const item of plaidItems) {
+          try {
+            const raw: any = await Plaid.getInvestmentHoldings(item.accessToken);
+            const secById = new Map<string, any>();
+            for (const s of raw.securities || []) secById.set(s.security_id, s);
+            for (const h of raw.holdings || []) {
+              const sec = secById.get(h.security_id) || {};
+              if (!sec.ticker_symbol) continue;
+              positions.push({
+                ticker: sec.ticker_symbol,
+                name: sec.name,
+                value: h.institution_value || 0,
+              });
+            }
+          } catch { /* skip broken item */ }
+        }
+        if (!positions.length) {
+          const manual = await storage.listHoldings(userId).catch(() => [] as any[]);
+          for (const h of manual) {
+            positions.push({
+              ticker: (h.ticker || "").toUpperCase(),
+              name: h.name || undefined,
+              value: (h.shares || 0) * (h.costBasis || 0),
+            });
+          }
+        }
+        if (positions.length) {
+          // Aggregate by ticker (Plaid sometimes splits across accounts).
+          const byTicker = new Map<string, { ticker: string; name?: string; value: number }>();
+          for (const p of positions) {
+            const prev = byTicker.get(p.ticker);
+            if (prev) prev.value += p.value;
+            else byTicker.set(p.ticker, { ...p });
+          }
+          const top = [...byTicker.values()].sort((a, b) => b.value - a.value)[0];
+          if (top && top.ticker) {
+            candidate = {
+              title: top.ticker,
+              subtitle: top.name,
+              url: `https://finance.yahoo.com/quote/${encodeURIComponent(top.ticker)}`,
+              signal: `your largest weighted holding by market value`,
+              source: "holdings",
+            };
+          }
+        }
+      }
+
+      if (domain === "artist") {
+        const st = await Spotify.userStatus(userId).catch(() => ({ authorized: false }));
+        if (st.authorized) {
+          const top: any = await Spotify.getTopTracks(userId, "short_term", 50).catch(() => ({ tracks: [] as any[] }));
+          // Count artist occurrences across recent top tracks; tiebreak by track count.
+          const counts = new Map<string, { name: string; count: number; id?: string; image?: string; url?: string }>();
+          for (const t of top.tracks || []) {
+            const a = t.artist || (Array.isArray(t.artists) && t.artists[0]?.name) || "";
+            if (!a) continue;
+            const key = a.toLowerCase();
+            const prev = counts.get(key);
+            if (prev) prev.count++;
+            else counts.set(key, { name: a, count: 1, image: t.image, url: t.artistUrl || t.url });
+          }
+          const top1 = [...counts.values()].sort((a, b) => b.count - a.count)[0];
+          if (top1) {
+            candidate = {
+              title: top1.name,
+              subtitle: `${top1.count} track${top1.count > 1 ? "s" : ""} in your short-term top`,
+              image: top1.image,
+              url: top1.url,
+              signal: `most-played artist across your short-term top tracks`,
+              source: "spotify",
+            };
+          }
+        }
+      }
+
+      if (domain === "movie" || domain === "show") {
+        const tmdbKey = process.env.TMDB_API_KEY;
+        if (tmdbKey) {
+          const path = domain === "movie" ? "trending/movie/week" : "trending/tv/week";
+          try {
+            const r = await fetch(`https://api.themoviedb.org/3/${path}?api_key=${tmdbKey}`);
+            if (r.ok) {
+              const j: any = await r.json();
+              const items: any[] = Array.isArray(j.results) ? j.results : [];
+              const ratings = await storage.listRatings(userId, domain === "movie" ? "film" : "show").catch(() => [] as any[]);
+              const seenIds = new Set(ratings.map((r: any) => r.externalId));
+              const unseen = items.find((it) => !seenIds.has(String(it.id)));
+              if (unseen) {
+                const title = unseen.title || unseen.name;
+                const date = (unseen.release_date || unseen.first_air_date || "").slice(0, 4);
+                candidate = {
+                  title,
+                  subtitle: [unseen.vote_average ? `★ ${unseen.vote_average.toFixed(1)}` : null, date].filter(Boolean).join(" · "),
+                  image: unseen.poster_path ? `https://image.tmdb.org/t/p/w200${unseen.poster_path}` : undefined,
+                  url: `https://www.themoviedb.org/${domain === "movie" ? "movie" : "tv"}/${unseen.id}`,
+                  signal: `top trending this week in ${domain === "movie" ? "film" : "TV"}, not yet on your list`,
+                  source: "tmdb",
+                };
+              }
+            }
+          } catch { /* ignore */ }
+        }
+      }
+
+      if (domain === "place") {
+        // Prefer an Atlas path that's near-future or recently added; fall back to saved food spot.
+        const link = await storage.getAtlasLink(userId).catch(() => null);
+        if (link) {
+          try {
+            const { paths } = await fetchAtlasPathsForUser(link.atlasUserId, { force: false });
+            const future = (paths || []).find((p: any) => p.scheduledFor && new Date(p.scheduledFor) > new Date());
+            const pick = future || (paths || [])[0];
+            if (pick) {
+              candidate = {
+                title: pick.title || pick.name || "Untitled path",
+                subtitle: pick.location || pick.city || undefined,
+                url: atlasShareUrl(pick.id),
+                signal: future ? `next scheduled stop on your Atlas` : `top of your Atlas paths`,
+                source: "atlas",
+              };
+            }
+          } catch { /* ignore */ }
+        }
+        if (!candidate) {
+          const spots = await storage.listFoodSpots(userId).catch(() => [] as any[]);
+          if (spots.length) {
+            const pick = spots[0];
+            candidate = {
+              title: pick.name,
+              subtitle: pick.city || pick.cuisine,
+              url: pick.url || undefined,
+              signal: `top of your saved places`,
+              source: "food-spots",
+            };
+          }
+        }
+      }
+
+      if (domain === "event") {
+        if (TM_KEY) {
+          // Use the user's last-known city via their food spots if available, else Honolulu fallback.
+          const spots = await storage.listFoodSpots(userId).catch(() => [] as any[]);
+          const city = (spots[0]?.city as string) || "Honolulu";
+          try {
+            const tmUrl = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TM_KEY}&city=${encodeURIComponent(city)}&size=10&sort=date,asc`;
+            const r = await fetch(tmUrl);
+            if (r.ok) {
+              const j: any = await r.json();
+              const events = j?._embedded?.events || [];
+              const next = events[0];
+              if (next) {
+                const venue = next._embedded?.venues?.[0]?.name;
+                const date = next.dates?.start?.localDate;
+                candidate = {
+                  title: next.name,
+                  subtitle: [venue, date].filter(Boolean).join(" · "),
+                  image: next.images?.[0]?.url,
+                  url: next.url,
+                  signal: `next upcoming event in ${city}`,
+                  source: "ticketmaster",
+                };
+              }
+            }
+          } catch { /* ignore */ }
+        }
+      }
+
+      if (!candidate) {
+        const empty = { domain, source: "empty", reason: "no-candidate-data" };
+        topPickCache.set(cacheKey, { ts: Date.now(), payload: empty });
+        return res.json(empty);
+      }
+
+      // ── Generate (or fall back to) one-liner ─────────────────────────────
+      const why = await claudeOneLiner(domain, {
+        title: candidate.title,
+        subtitle: candidate.subtitle,
+        signal: candidate.signal,
+      });
+
+      const payload: TopPick = {
+        domain,
+        title: candidate.title,
+        subtitle: candidate.subtitle,
+        image: candidate.image,
+        url: candidate.url,
+        why,
+        source: candidate.source,
+        asOf: new Date().toISOString(),
+      };
+
+      topPickCache.set(cacheKey, { ts: Date.now(), payload });
+      res.json(payload);
+    } catch (e: any) {
+      console.error("top-picks error:", e?.message);
+      res.status(500).json({ message: e?.message || "unknown" });
     }
   });
 

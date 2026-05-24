@@ -11,6 +11,7 @@ import { scoreCatalog } from "@/data/score";
 import { PillTabs } from "@/components/PillTabs";
 import { useTabParam } from "@/hooks/useTabParam";
 import Film from "@/pages/Film";
+import { TopPickPill } from "@/components/TopPickPill";
 
 interface CatalogItem {
   id: string;
@@ -28,10 +29,15 @@ interface CatalogItem {
 
 type Filter = "all" | "show" | "film";
 
-function WatchCatalog() {
+function WatchCatalog({ kindFilter }: { kindFilter?: "show" | "film" } = {}) {
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
+  // When kindFilter is provided (Shows/Movies tabs), it's pinned and the UI
+  // hides the filter pills. Plain Catalog tab keeps full "all/show/film" toggle.
+  const [filter, setFilter] = useState<Filter>(kindFilter ?? "all");
+  useEffect(() => {
+    if (kindFilter) setFilter(kindFilter);
+  }, [kindFilter]);
   const [seedQuery, setSeedQuery] = useState("");
   const [seedDebounced, setSeedDebounced] = useState("");
   // Pagination for "rest of the catalog" — 6 per page (2 rows × 3)
@@ -383,16 +389,18 @@ function CatalogCard({ item, total, components, reasons }: any) {
   );
 }
 
-/* ============ Watch wrapper with Film tab ============ */
-type WatchTab = "catalog" | "film";
+/* ============ Watch wrapper: Catalog | Shows | Movies ============ */
+type WatchTab = "catalog" | "show" | "movie";
 const WATCH_TABS = [
   { id: "catalog" as const, label: "Catalog" },
-  { id: "film" as const, label: "Film" },
+  { id: "show" as const, label: "Shows" },
+  { id: "movie" as const, label: "Movies" },
 ];
 
 export default function Watch() {
   const [tab, setTab] = useTabParam<WatchTab>("catalog");
-  const active: WatchTab = tab === "film" ? "film" : "catalog";
+  const active: WatchTab =
+    tab === "show" || tab === "movie" ? tab : "catalog";
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -400,7 +408,21 @@ export default function Watch() {
         <div className="eyebrow">Watch</div>
         <PillTabs tabs={WATCH_TABS} value={active} onChange={setTab} testIdPrefix="tab-watch" />
       </div>
-      {active === "catalog" ? <WatchCatalog /> : <Film />}
+
+      {active === "show" && (
+        <div data-testid="section-top-show">
+          <TopPickPill domain="show" />
+        </div>
+      )}
+      {active === "movie" && (
+        <div data-testid="section-top-movie">
+          <TopPickPill domain="movie" />
+        </div>
+      )}
+
+      {active === "catalog" && <WatchCatalog />}
+      {active === "show" && <WatchCatalog kindFilter="show" />}
+      {active === "movie" && <WatchCatalog kindFilter="film" />}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { TopPickPill } from "@/components/TopPickPill";
 import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, ArrowUpRight, Building2 } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { PlaidConnect } from "@/components/PlaidConnect";
@@ -246,6 +247,7 @@ function FinancePortfolio() {
             Finance {mode === "demo" && <span className="ml-2 text-gold">· demo</span>}
           </div>
           <LiveHeartbeat />
+          <TopPickPill domain="stock" className="ml-auto" />
         </div>
         <div className="flex items-end justify-between flex-wrap gap-6">
           <div>
