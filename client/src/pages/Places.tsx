@@ -160,7 +160,6 @@ function PlacesMain() {
   return (
     <div className="space-y-14 animate-fade-in">
       <section>
-        <div className="eyebrow mb-3">Places</div>
         <h1 className="font-display text-[clamp(1.875rem,3.5vw,2.75rem)] leading-[1.02] tracking-tight max-w-3xl">
           A memory map. Grouped by likeness, not by latitude.
         </h1>

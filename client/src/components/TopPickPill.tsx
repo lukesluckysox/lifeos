@@ -35,7 +35,7 @@ const DOMAIN_LABEL: Record<TopPickDomain, string> = {
  *   - stock / artist / movie / show → anchored to user data in that category
  *   - place / event                 → anchored to the currently selected city
  */
-export function TopPickPill({ domain, className = "" }: { domain: TopPickDomain; className?: string }) {
+export function TopPickPill({ domain, className = "", compact = false }: { domain: TopPickDomain; className?: string; compact?: boolean }) {
   const { mode, withMode } = useMode();
   const { city } = useCity();
 
@@ -87,15 +87,17 @@ export function TopPickPill({ domain, className = "" }: { domain: TopPickDomain;
         {DOMAIN_LABEL[domain]}
       </span>
       <span
-        className="text-sm font-medium text-foreground truncate"
+        className="text-sm font-medium text-foreground truncate min-w-0 flex-1"
         data-testid={`text-top-${domain}-title`}
+        title={data.title}
       >
         {data.title}
       </span>
-      {data.why && (
+      {data.why && !compact && (
         <span
-          className="hidden sm:inline text-xs text-muted-foreground truncate"
+          className="hidden xl:inline text-xs text-muted-foreground truncate min-w-0 max-w-[45%] shrink"
           data-testid={`text-top-${domain}-why`}
+          title={data.why}
         >
           — {data.why}
         </span>

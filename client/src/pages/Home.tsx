@@ -342,7 +342,7 @@ function HomeCardWithPill({
   return (
     <div className="flex flex-col gap-2 min-w-0">
       {children}
-      <TopPickPill domain={domain} className="self-start max-w-full" />
+      <TopPickPill domain={domain} compact className="self-start max-w-full" />
     </div>
   );
 }

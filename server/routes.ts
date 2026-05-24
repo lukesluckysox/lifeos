@@ -187,6 +187,36 @@ export async function registerRoutes(
     console.warn("[atlas] demo seed skipped:", e.message);
   }
 
+  // ── Demo Saved bookmarks ──────────────────────────────────────
+  // Bookmarks live in the ratings table with signal=0 (watchlist). Seed a
+  // handful for user_id=1 so the Saved page shows a populated shortlist out
+  // of the box. Idempotent — skip if the user already has any bookmarks.
+  try {
+    const ratings = await storage.listRatings(1);
+    const hasBookmark = ratings.some((r) => r.signal === 0);
+    if (!hasBookmark) {
+      const demoBookmarks: Array<{ kind: string; externalId: string; title: string; meta?: any }> = [
+        { kind: "place", externalId: "demo-bishop-museum", title: "Bishop Museum", meta: { city: "Honolulu", subtitle: "State museum of Hawaiian + Pacific culture" } },
+        { kind: "place", externalId: "demo-lanikai-pillbox", title: "Lanikai Pillbox Hike", meta: { city: "Honolulu", subtitle: "Short, steep climb to a turquoise overlook" } },
+        { kind: "event", externalId: "demo-chris-botti", title: "Chris Botti", meta: { city: "Honolulu", subtitle: "Blue Note Hawaii · May 25" } },
+        { kind: "show", externalId: "demo-slow-horses", title: "Slow Horses", meta: { year: 2022, subtitle: "MI5's rejects, led by a slovenly Gary Oldman" } },
+        { kind: "film", externalId: "demo-tinker-tailor", title: "Tinker Tailor Soldier Spy", meta: { year: 2011, subtitle: "Le Carré adaptation" } },
+      ];
+      for (const b of demoBookmarks) {
+        await storage.upsertRating(1, {
+          kind: b.kind,
+          externalId: b.externalId,
+          title: b.title,
+          signal: 0,
+          meta: b.meta ? JSON.stringify(b.meta) : null,
+        } as any);
+      }
+      console.log(`[demo] seeded ${demoBookmarks.length} Saved bookmarks for user_id=1`);
+    }
+  } catch (e: any) {
+    console.warn("[demo] bookmarks seed skipped:", e.message);
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   // Auth — Spotify OAuth as login
   // ══════════════════════════════════════════════════════════════════════════
@@ -2766,6 +2796,72 @@ Do not invent genres not in the input.`;
     }
   }
 
+  // Editorial fallbacks — curated defaults when the user has no data in a
+  // domain (or a live API key is missing). The pill should never go dark.
+  type FallbackCandidate = {
+    title: string;
+    subtitle?: string;
+    image?: string;
+    url?: string;
+    signal: string;
+    source: string;
+  };
+  function editorialFallback(domain: string, cityParam: string): FallbackCandidate | null {
+    const city = cityParam || "your city";
+    switch (domain) {
+      case "stock":
+        return {
+          title: "SPY",
+          subtitle: "S&P 500 ETF",
+          url: "https://finance.yahoo.com/quote/SPY",
+          signal: "add a holding to see your own top pick — SPY is the broad-market default",
+          source: "editorial",
+        };
+      case "artist":
+        return {
+          title: "Connect Spotify",
+          subtitle: "to surface your top artist",
+          url: "#/settings",
+          signal: "connect Spotify and we'll surface your most-played artist here",
+          source: "editorial",
+        };
+      case "movie":
+        return {
+          title: "Seed your taste",
+          subtitle: "in Watch → Catalog",
+          url: "#/watch?tab=catalog",
+          signal: "add a film you love to Catalog and we'll surface a fresh pick",
+          source: "editorial",
+        };
+      case "show":
+        return {
+          title: "Seed your taste",
+          subtitle: "in Watch → Catalog",
+          url: "#/watch?tab=catalog",
+          signal: "add a show you love to Catalog and we'll surface a fresh pick",
+          source: "editorial",
+        };
+      case "place":
+        return {
+          title: `Explore ${city}`,
+          subtitle: "top sights are below",
+          url: "#/places",
+          signal: `pin a place in ${city} to anchor your top pick here`,
+          source: "editorial",
+        };
+      case "event":
+        return {
+          title: `Search ${city} events`,
+          subtitle: "concerts, sports, arts",
+          url: "#/events",
+          signal: `events in ${city} will surface here once data is available`,
+          source: "editorial",
+        };
+      default:
+        return null;
+    }
+  }
+
   app.get("/api/top-picks", optionalAuth, async (req, res) => {
     try {
       const domain = (req.query.domain as string | undefined) || "";
@@ -3065,6 +3161,15 @@ Do not invent genres not in the input.`;
             }
           } catch { /* ignore */ }
         }
+      }
+
+      // ── Editorial fallback ─────────────────────────────────────────────
+      // If the user has no data in this domain (or a live API is missing),
+      // surface a curated default so the pill never goes dark. These are
+      // intentionally generic but high-quality — they tell the user what
+      // *kind* of recommendation lives here.
+      if (!candidate) {
+        candidate = editorialFallback(domain, cityParam);
       }
 
       if (!candidate) {
