@@ -1859,9 +1859,10 @@ export async function registerRoutes(
     if (cached && Date.now() < cached.expiresAt) return cached.data;
 
     try {
-      const range = `${weeks}wk`;
+      // Yahoo's `range` only accepts presets (1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max).
+      // Always fetch 1y of daily candles, then slice locally by `weeks * 5` trading days.
       const r = await fetch(
-        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=1d`,
+        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d`,
         { headers: { "User-Agent": "Mozilla/5.0" } }
       );
       if (!r.ok) throw new Error(`Yahoo ${r.status}`);
@@ -1869,10 +1870,12 @@ export async function registerRoutes(
       const result = data?.chart?.result?.[0];
       if (!result) throw new Error("no result");
       const meta = result.meta;
-      const closes: number[] = (result.indicators?.quote?.[0]?.close ?? []).filter((c: any) => c != null);
-      if (!closes.length) throw new Error("no closes");
-      const first = closes[0];
-      const last = meta.regularMarketPrice ?? closes[closes.length - 1];
+      const closesAll: number[] = (result.indicators?.quote?.[0]?.close ?? []).filter((c: any) => c != null);
+      if (!closesAll.length) throw new Error("no closes");
+      const tradingDays = Math.max(5, Math.round(weeks * 5));
+      const sliced = closesAll.slice(Math.max(0, closesAll.length - tradingDays));
+      const first = sliced[0];
+      const last = meta.regularMarketPrice ?? sliced[sliced.length - 1];
       const returnPct = first > 0 ? ((last - first) / first) * 100 : 0;
       const sentiment = returnPctToSentiment(returnPct);
       const out: SentimentResult = {
@@ -2035,6 +2038,114 @@ export async function registerRoutes(
     "Energy":     ["XOM", "CVX", "COP", "SLB", "EOG", "OXY", "PSX", "MPC", "VLO", "HES"],
     "Crypto":     ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "LINK", "DOT", "MATIC"],
   };
+
+  // Reverse index: symbol -> sector (from curated map above)
+  const SYMBOL_TO_SECTOR_CURATED: Record<string, string> = (() => {
+    const m: Record<string, string> = {};
+    for (const [sector, syms] of Object.entries(SECTOR_UNIVERSE)) {
+      for (const s of syms) m[s.toUpperCase()] = sector;
+    }
+    return m;
+  })();
+
+  // ETF / broad-market sector heuristics (no API call needed)
+  const ETF_SECTOR_HINTS: Record<string, string> = {
+    SPY: "Broad Market", VOO: "Broad Market", VTI: "Broad Market", IVV: "Broad Market",
+    QQQ: "Tech", QQQM: "Tech", XLK: "Tech", VGT: "Tech", SMH: "Tech", SOXX: "Tech", SOXL: "Tech",
+    XLF: "Finance", VFH: "Finance",
+    XLV: "Healthcare", VHT: "Healthcare",
+    XLY: "Consumer", XLP: "Consumer", VCR: "Consumer", VDC: "Consumer",
+    XLE: "Energy", VDE: "Energy",
+    XLI: "Industrials", VIS: "Industrials",
+    XLU: "Utilities", VPU: "Utilities",
+    XLB: "Materials", VAW: "Materials",
+    XLRE: "Real Estate", VNQ: "Real Estate",
+    XLC: "Communications", VOX: "Communications",
+    DIA: "Broad Market", IWM: "Broad Market",
+    VXUS: "International", EFA: "International", EEM: "International",
+    BND: "Bonds", AGG: "Bonds", TLT: "Bonds", IEF: "Bonds", SHY: "Bonds",
+    GLD: "Commodities", SLV: "Commodities", USO: "Commodities", DBC: "Commodities",
+  };
+
+  // Yahoo Finance sector → our normalized sector buckets
+  function normalizeYahooSector(raw: string | null | undefined): string {
+    if (!raw) return "Other";
+    const s = raw.toLowerCase();
+    if (s.includes("technology")) return "Tech";
+    if (s.includes("financial")) return "Finance";
+    if (s.includes("health")) return "Healthcare";
+    if (s.includes("consumer")) return "Consumer";
+    if (s.includes("energy")) return "Energy";
+    if (s.includes("industrial")) return "Industrials";
+    if (s.includes("utilit")) return "Utilities";
+    if (s.includes("material") || s.includes("basic")) return "Materials";
+    if (s.includes("real estate")) return "Real Estate";
+    if (s.includes("communication")) return "Communications";
+    return raw;
+  }
+
+  // Cache symbol -> sector lookups (24h)
+  const sectorLookupCache = new Map<string, { sector: string; expiresAt: number }>();
+  const SECTOR_LOOKUP_TTL = 24 * 60 * 60 * 1000;
+
+  async function fetchSymbolSector(rawSym: string): Promise<string> {
+    const sym = rawSym.toUpperCase().trim();
+    if (!sym) return "Other";
+
+    // 1. Curated map
+    if (SYMBOL_TO_SECTOR_CURATED[sym]) return SYMBOL_TO_SECTOR_CURATED[sym];
+
+    // 2. Known ETF / broad-market
+    if (ETF_SECTOR_HINTS[sym]) return ETF_SECTOR_HINTS[sym];
+
+    // 3. Crypto sniff (BTC-USD, ETH-USD, etc.)
+    if (sym.endsWith("-USD") || /^(BTC|ETH|SOL|XRP|ADA|DOGE|AVAX|LINK|DOT|MATIC)$/.test(sym)) return "Crypto";
+
+    // 4. Cache
+    const cached = sectorLookupCache.get(sym);
+    if (cached && Date.now() < cached.expiresAt) return cached.sector;
+
+    // 5. Yahoo quoteSummary fallback
+    try {
+      const r = await fetch(
+        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=assetProfile,quoteType`,
+        { headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      if (!r.ok) throw new Error(`Yahoo ${r.status}`);
+      const data = await r.json();
+      const result = data?.quoteSummary?.result?.[0];
+      const quoteType: string | undefined = result?.quoteType?.quoteType;
+      const rawSector: string | undefined = result?.assetProfile?.sector;
+
+      let sector = "Other";
+      if (quoteType === "ETF" || quoteType === "MUTUALFUND") sector = "Broad Market";
+      else if (quoteType === "CRYPTOCURRENCY") sector = "Crypto";
+      else if (rawSector) sector = normalizeYahooSector(rawSector);
+
+      sectorLookupCache.set(sym, { sector, expiresAt: Date.now() + SECTOR_LOOKUP_TTL });
+      return sector;
+    } catch {
+      // Cache short so we retry later
+      sectorLookupCache.set(sym, { sector: "Other", expiresAt: Date.now() + 60 * 60 * 1000 });
+      return "Other";
+    }
+  }
+
+  app.post("/api/sector-lookup", async (req, res) => {
+    const { symbols } = req.body || {};
+    if (!Array.isArray(symbols)) return res.status(400).json({ message: "symbols array required" });
+    const uniq = Array.from(new Set((symbols as string[]).map((s) => String(s).toUpperCase()).filter(Boolean)));
+    try {
+      const mapping = await Promise.all(
+        uniq.map(async (sym) => ({ symbol: sym, sector: await fetchSymbolSector(sym) }))
+      );
+      const result: Record<string, string> = {};
+      for (const m of mapping) result[m.symbol] = m.sector;
+      res.json({ sectors: result });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
 
   // Crypto symbols on Yahoo Finance are quoted as `<TICKER>-USD`
   function yahooSymbol(sym: string, sector: string): string {
