@@ -2107,28 +2107,125 @@ Do not invent genres not in the input.`;
   const sentimentCache = new Map<string, { data: SentimentResult; expiresAt: number }>();
   const SENTIMENT_TTL = 5 * 60 * 1000; // 5 minutes
 
+  interface SignalReason {
+    tag: string;          // short chip text, e.g. "RSI 78"
+    weight: number;       // -1..+1 — how much this nudges the composite
+    detail?: string;      // longer tooltip / explainer
+  }
+
   interface SentimentResult {
     symbol: string;
     currentPrice: number | null;
     returnPct: number | null;
-    sentiment: number;
-    label: string;
+    sentiment: number;     // composite -1..+1
+    label: string;         // Strong Buy / Buy / Hold / Sell / Strong Sell
+    // New fields — additive, safe for older clients
+    reasons?: SignalReason[];
+    factors?: {
+      momentum: number | null;     // -1..+1 derived from return
+      trend: number | null;        // -1..+1 from price vs 50d SMA
+      drawdown: number | null;     // -1..+1 from % off lookback high (negative = far off high)
+      rsi: number | null;          // raw 0..100
+      rsiSignal: number | null;    // -1..+1 (high RSI = bearish/overbought)
+      volatilityPct: number | null;// annualized stdev of daily returns, in %
+      sharpe: number | null;       // return / volatility (mini)
+    };
+    action?: string;       // poignant one-liner, e.g. "Trim — overbought, momentum rolling over"
+    conviction?: number;   // 1..3 (stars)
   }
 
   function scoreToLabel(s: number): string {
-    if (s >= 0.75) return "Strong Bullish";
-    if (s >= 0.25) return "Bullish";
-    if (s > -0.25) return "Neutral";
-    if (s > -0.75) return "Bearish";
-    return "Strong Bearish";
+    if (s >= 0.6)  return "Strong Buy";
+    if (s >= 0.2)  return "Buy";
+    if (s > -0.2)  return "Hold";
+    if (s > -0.6)  return "Sell";
+    return "Strong Sell";
   }
 
-  function returnPctToSentiment(pct: number): number {
-    if (pct >= 30) return 1.0;
-    if (pct >= 5) return 0.5;
-    if (pct > -5) return 0.0;
-    if (pct > -30) return -0.5;
-    return -1.0;
+  function clamp(n: number, lo = -1, hi = 1): number { return Math.max(lo, Math.min(hi, n)); }
+
+  function sma(arr: number[], n: number): number | null {
+    if (arr.length < n) return null;
+    let s = 0;
+    for (let i = arr.length - n; i < arr.length; i++) s += arr[i];
+    return s / n;
+  }
+
+  // Wilder's RSI(14) — industry standard
+  function rsi(arr: number[], n = 14): number | null {
+    if (arr.length <= n) return null;
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= n; i++) {
+      const d = arr[i] - arr[i - 1];
+      if (d >= 0) gains += d; else losses -= d;
+    }
+    let avgG = gains / n;
+    let avgL = losses / n;
+    for (let i = n + 1; i < arr.length; i++) {
+      const d = arr[i] - arr[i - 1];
+      const g = d > 0 ? d : 0;
+      const l = d < 0 ? -d : 0;
+      avgG = (avgG * (n - 1) + g) / n;
+      avgL = (avgL * (n - 1) + l) / n;
+    }
+    if (avgL === 0) return 100;
+    const rs = avgG / avgL;
+    return 100 - 100 / (1 + rs);
+  }
+
+  function dailyVolPct(arr: number[]): number | null {
+    if (arr.length < 5) return null;
+    const rets: number[] = [];
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i - 1] > 0) rets.push((arr[i] - arr[i - 1]) / arr[i - 1]);
+    }
+    if (rets.length < 2) return null;
+    const mean = rets.reduce((s, x) => s + x, 0) / rets.length;
+    const variance = rets.reduce((s, x) => s + (x - mean) ** 2, 0) / (rets.length - 1);
+    // annualized stdev in %
+    return Math.sqrt(variance) * Math.sqrt(252) * 100;
+  }
+
+  function returnPctToMomentum(pct: number): number {
+    // smoother than step-function: tanh keeps ±30% near saturation
+    return clamp(Math.tanh(pct / 20));
+  }
+
+  function buildActionLine(label: string, factors: NonNullable<SentimentResult["factors"]>): string {
+    const { rsi: rsiV, trend, drawdown, momentum } = factors;
+    const overbought = rsiV != null && rsiV >= 70;
+    const oversold = rsiV != null && rsiV <= 30;
+    const aboveTrend = (trend ?? 0) > 0.1;
+    const belowTrend = (trend ?? 0) < -0.1;
+    const farOffHigh = (drawdown ?? 0) < -0.4;
+    const momentumUp = (momentum ?? 0) > 0.3;
+    const momentumDown = (momentum ?? 0) < -0.3;
+
+    if (label === "Strong Buy") {
+      if (oversold) return "Accumulate — beaten down, oversold, mean-reversion setup.";
+      if (aboveTrend && momentumUp) return "Add on weakness — trend intact, momentum durable.";
+      return "Accumulate — multiple factors lining up bullish.";
+    }
+    if (label === "Buy") {
+      if (aboveTrend) return "Lean in — above the 50-day, breathing room before overbought.";
+      if (oversold) return "Probe a starter — oversold but trend hasn't confirmed yet.";
+      return "Lean in modestly — signals tilt positive, not euphoric.";
+    }
+    if (label === "Sell") {
+      if (overbought) return "Trim — extended on RSI, risk/reward is asymmetric here.";
+      if (belowTrend && momentumDown) return "Lighten up — below the 50-day, momentum has rolled.";
+      return "Tighten the leash — factors tilting unfavorable.";
+    }
+    if (label === "Strong Sell") {
+      if (overbought && farOffHigh) return "Take profits — exhausted move and structural damage.";
+      if (belowTrend) return "Cut size — trend broken, no factor defending it.";
+      return "Reduce — broad-based deterioration.";
+    }
+    // Hold
+    if (overbought) return "Hold but don't add — overbought without trend rolling yet.";
+    if (oversold) return "Hold and watch — oversold but no reversal signal yet.";
+    if (farOffHigh) return "Hold — well off the highs, waiting for a base.";
+    return "Hold — mixed signals, no edge either way.";
   }
 
   async function fetchSentiment(symbol: string, weeks: number): Promise<SentimentResult> {
@@ -2155,18 +2252,97 @@ Do not invent genres not in the input.`;
       const first = sliced[0];
       const last = meta.regularMarketPrice ?? sliced[sliced.length - 1];
       const returnPct = first > 0 ? ((last - first) / first) * 100 : 0;
-      const sentiment = returnPctToSentiment(returnPct);
+
+      // ── Factor: momentum (return over window) ──────────────────────
+      const momentum = returnPctToMomentum(returnPct);
+
+      // ── Factor: trend (price vs 50-day SMA on full 1y series) ──────
+      const sma50 = sma(closesAll, 50);
+      const trendPct = sma50 ? ((last - sma50) / sma50) * 100 : null; // signed % above/below
+      const trend = trendPct != null ? clamp(Math.tanh(trendPct / 8)) : null;
+
+      // ── Factor: drawdown from window high ─────────────────────────
+      const windowHigh = sliced.reduce((m, c) => (c > m ? c : m), -Infinity);
+      const drawdownPct = windowHigh > 0 ? ((last - windowHigh) / windowHigh) * 100 : 0; // <=0
+      // map 0 → 0 (at high), -10% → -0.3, -30% → -0.85, -50% → -1
+      const drawdown = clamp(Math.tanh(drawdownPct / 20));
+
+      // ── Factor: RSI(14) on full series for stability ──────────────
+      const rsiV = rsi(closesAll, 14);
+      // overbought 70+ → bearish; oversold 30- → bullish (mean reversion)
+      // map 50→0, 70→-0.5, 30→+0.5, 80→-0.8, 20→+0.8
+      const rsiSignal = rsiV != null ? clamp((50 - rsiV) / 25) : null;
+
+      // ── Factor: volatility / mini-Sharpe ──────────────────────────
+      const volatilityPct = dailyVolPct(sliced);
+      const sharpe = volatilityPct && volatilityPct > 0 ? returnPct / volatilityPct : null;
+
+      // ── Composite (weighted average of available factors) ─────────
+      const FACTOR_WEIGHTS: Record<string, number> = {
+        momentum: 0.35,
+        trend:    0.25,
+        drawdown: 0.15,  // small — being off-high isn't directional on its own
+        rsiSignal:0.25,
+      };
+      let num = 0, den = 0;
+      const factorMap: Record<string, number | null> = { momentum, trend, drawdown, rsiSignal };
+      for (const [k, w] of Object.entries(FACTOR_WEIGHTS)) {
+        const v = factorMap[k];
+        if (v != null && Number.isFinite(v)) { num += v * w; den += w; }
+      }
+      const composite = den > 0 ? clamp(num / den) : 0;
+
+      // ── Reasons (top 2-3 strongest signed factors) ────────────────
+      const reasons: SignalReason[] = [];
+      if (rsiV != null) {
+        if (rsiV >= 70) reasons.push({ tag: `RSI ${rsiV.toFixed(0)} · overbought`, weight: -((rsiV - 70) / 30), detail: "RSI above 70 historically precedes pullbacks." });
+        else if (rsiV <= 30) reasons.push({ tag: `RSI ${rsiV.toFixed(0)} · oversold`, weight: ((30 - rsiV) / 30), detail: "RSI below 30 often marks mean-reversion setups." });
+      }
+      if (trendPct != null) {
+        if (trendPct >= 3) reasons.push({ tag: `+${trendPct.toFixed(1)}% above 50-day`, weight: clamp(trendPct / 15), detail: "Trading above the 50-day SMA — uptrend intact." });
+        else if (trendPct <= -3) reasons.push({ tag: `${trendPct.toFixed(1)}% below 50-day`, weight: clamp(trendPct / 15), detail: "Below the 50-day SMA — downtrend in force." });
+      }
+      if (Math.abs(returnPct) >= 5) {
+        reasons.push({
+          tag: `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)}% this window`,
+          weight: momentum,
+          detail: `Total return over the active lookback.`,
+        });
+      }
+      if (drawdownPct <= -10) {
+        reasons.push({ tag: `${drawdownPct.toFixed(0)}% off window high`, weight: drawdown, detail: "Distance from the highest close in the window." });
+      }
+      if (sharpe != null && Math.abs(sharpe) >= 0.5) {
+        reasons.push({
+          tag: `${sharpe >= 0 ? "+" : ""}${sharpe.toFixed(2)} return/vol`,
+          weight: clamp(sharpe / 3),
+          detail: "Mini risk-adjusted return — return divided by annualized volatility.",
+        });
+      }
+      // sort by absolute weight, keep top 3
+      reasons.sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
+      const topReasons = reasons.slice(0, 3);
+
+      const label = scoreToLabel(composite);
+      const factors = { momentum, trend, drawdown, rsi: rsiV, rsiSignal, volatilityPct, sharpe };
+      const action = buildActionLine(label, factors);
+      const conviction = Math.abs(composite) >= 0.6 ? 3 : Math.abs(composite) >= 0.3 ? 2 : 1;
+
       const out: SentimentResult = {
         symbol,
         currentPrice: last,
         returnPct,
-        sentiment,
-        label: scoreToLabel(sentiment),
+        sentiment: composite,
+        label,
+        reasons: topReasons,
+        factors,
+        action,
+        conviction,
       };
       sentimentCache.set(cacheKey, { data: out, expiresAt: Date.now() + SENTIMENT_TTL });
       return out;
     } catch {
-      const out: SentimentResult = { symbol, currentPrice: null, returnPct: null, sentiment: 0, label: "Neutral" };
+      const out: SentimentResult = { symbol, currentPrice: null, returnPct: null, sentiment: 0, label: "Hold", reasons: [], factors: { momentum: null, trend: null, drawdown: null, rsi: null, rsiSignal: null, volatilityPct: null, sharpe: null }, action: "No data available.", conviction: 1 };
       return out;
     }
   }
@@ -2461,6 +2637,128 @@ Do not invent genres not in the input.`;
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Optimal allocation across canonical sector lanes
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // POST /api/optimal-allocation
+  // body: { holdings: [{ symbol, value }], weeks }
+  // Returns the SAME 6 canonical lanes as /api/sector-leaders so the donut and
+  // the trophy cards line up visually and conceptually.
+  app.post("/api/optimal-allocation", async (req, res) => {
+    const { holdings, weeks: rawWeeks } = req.body || {};
+    const weeks = Math.max(1, Math.min(52, parseInt(String(rawWeeks || 13), 10) || 13));
+    if (!Array.isArray(holdings)) return res.status(400).json({ message: "holdings array required" });
+
+    // 1. Canonical sectors (same order as SECTOR_UNIVERSE → same as CategoryLeaders)
+    const canonical = Object.keys(SECTOR_UNIVERSE); // ["Tech","Finance","Healthcare","Consumer","Energy","Crypto"]
+
+    // 2. Bucket each holding's value into a canonical sector (or "Other")
+    const sectorValue: Record<string, number> = {};
+    const sectorSymbols: Record<string, string[]> = {};
+    let totalValue = 0;
+    let otherValue = 0;
+    const otherSymbols: string[] = [];
+
+    for (const h of holdings as { symbol: string; value: number }[]) {
+      if (!h?.symbol || !Number.isFinite(h.value) || h.value <= 0) continue;
+      const sym = String(h.symbol).toUpperCase();
+      const sector = await fetchSymbolSector(sym);
+      totalValue += h.value;
+      if (canonical.includes(sector)) {
+        sectorValue[sector] = (sectorValue[sector] ?? 0) + h.value;
+        (sectorSymbols[sector] = sectorSymbols[sector] ?? []).push(sym);
+      } else {
+        otherValue += h.value;
+        otherSymbols.push(sym);
+      }
+    }
+
+    // 3. Get each canonical sector's return over the lookback — use the
+    //    average return of the top-5 symbols in that sector (proxy for sector ETF).
+    const sectorReturns = await Promise.all(
+      canonical.map(async (name) => {
+        const top = SECTOR_UNIVERSE[name].slice(0, 5);
+        const rs = await Promise.all(
+          top.map((s) => fetchSentiment(yahooSymbol(s, name), weeks).catch(() => null))
+        );
+        const valid = rs.filter((x) => x && x.returnPct != null) as { returnPct: number | null }[];
+        if (!valid.length) return { name, returnPct: null as number | null, leader: null as string | null };
+        const avg = valid.reduce((s, x) => s + (x.returnPct ?? 0), 0) / valid.length;
+        // also find the leader (highest return) for actionable hint
+        let leaderSym: string | null = null;
+        let leaderRet = -Infinity;
+        for (let i = 0; i < rs.length; i++) {
+          const r = rs[i];
+          if (r && r.returnPct != null && r.returnPct > leaderRet) {
+            leaderRet = r.returnPct;
+            leaderSym = top[i];
+          }
+        }
+        return { name, returnPct: avg, leader: leaderSym };
+      })
+    );
+
+    // 4. Build current weights (canonical sectors only; cash/other reported separately)
+    const lanes = canonical.map((name) => {
+      const sr = sectorReturns.find((x) => x.name === name);
+      const value = sectorValue[name] ?? 0;
+      const currentWeight = totalValue > 0 ? value / totalValue : 0;
+      return {
+        sector: name,
+        currentWeight,
+        currentValue: value,
+        symbols: sectorSymbols[name] ?? [],
+        sectorReturnPct: sr?.returnPct ?? null,
+        leader: sr?.leader ?? null,
+      };
+    });
+
+    // 5. Optimal weights: performance-weighted across the canonical universe,
+    //    losers keep a baseline so the book stays diversified.
+    //    score = max(returnPct, 0) + 1   (flat = 1, +30% = 31, -10% = 1)
+    const scored = lanes.map((l) => {
+      const r = l.sectorReturnPct ?? 0;
+      return { ...l, score: Math.max(r, 0) + 1 };
+    });
+    const totalScore = scored.reduce((s, x) => s + x.score, 0) || 1;
+    const out = scored.map((l) => {
+      const optimalWeight = l.score / totalScore;
+      const delta = optimalWeight - l.currentWeight;
+      // poignant per-lane action chip
+      let actionChip: string | null = null;
+      if (l.currentWeight === 0 && (l.sectorReturnPct ?? 0) > 5) {
+        actionChip = `Add exposure — sector +${(l.sectorReturnPct ?? 0).toFixed(1)}%${l.leader ? `, leader ${l.leader}` : ""}`;
+      } else if (delta > 0.05) {
+        actionChip = `Underweight by ${(delta * 100).toFixed(1)}pt — sector ${(l.sectorReturnPct ?? 0) >= 0 ? "+" : ""}${(l.sectorReturnPct ?? 0).toFixed(1)}%`;
+      } else if (delta < -0.05) {
+        actionChip = `Overweight by ${(Math.abs(delta) * 100).toFixed(1)}pt — consider trim`;
+      } else if (l.currentWeight > 0) {
+        actionChip = `On target`;
+      }
+      return {
+        sector: l.sector,
+        currentWeight: l.currentWeight,
+        currentValue: l.currentValue,
+        optimalWeight,
+        deltaWeight: delta,
+        sectorReturnPct: l.sectorReturnPct,
+        leader: l.leader,
+        symbols: l.symbols,
+        action: actionChip,
+      };
+    });
+
+    res.json({
+      lanes: out,
+      otherWeight: totalValue > 0 ? otherValue / totalValue : 0,
+      otherValue,
+      otherSymbols,
+      totalValue,
+      weeks,
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════

@@ -5,17 +5,9 @@ import { useLookback } from "@/components/LookbackContext";
 
 /* ---------- Types ---------- */
 
-interface SentimentResult {
-  symbol: string;
-  currentPrice: number | null;
-  returnPct: number | null;
-  sentiment: number;
-  label: string;
-}
-
 interface Holding {
   symbol: string;
-  value: number; // current dollar value
+  value: number;
   name?: string;
 }
 
@@ -23,44 +15,48 @@ interface Props {
   holdings: Holding[];
 }
 
+interface Lane {
+  sector: string;
+  currentWeight: number;
+  currentValue: number;
+  optimalWeight: number;
+  deltaWeight: number;
+  sectorReturnPct: number | null;
+  leader: string | null;
+  symbols: string[];
+  action: string | null;
+}
+
+interface OptimalResp {
+  lanes: Lane[];
+  otherWeight: number;
+  otherValue: number;
+  otherSymbols: string[];
+  totalValue: number;
+  weeks: number;
+}
+
 interface SectorSlice {
   sector: string;
-  weight: number; // 0..1
-  value: number;
-  returnPct: number | null; // value-weighted avg return of constituents
+  weight: number;
   color: string;
-  symbols: string[]; // constituents for tooltip / debug
+  returnPct: number | null;
 }
 
-interface SectorLookupResp {
-  sectors: Record<string, string>;
-}
-
-/* ---------- Sector palette (deterministic) ---------- */
+/* ---------- Sector palette — must match CategoryLeaders accent colors ---------- */
 
 const SECTOR_COLORS: Record<string, string> = {
-  Tech:           "#5eead4", // teal-300
-  Finance:        "#a78bfa", // violet-400
-  Healthcare:     "#fb7185", // rose-400
-  Consumer:       "#f59e0b", // amber-500
-  Energy:         "#fb923c", // orange-400
-  Crypto:         "#facc15", // yellow-400
-  Industrials:    "#60a5fa", // blue-400
-  Utilities:      "#34d399", // emerald-400
-  Materials:      "#f472b6", // pink-400
-  "Real Estate":  "#22d3ee", // cyan-400
-  Communications: "#c084fc", // purple-400
-  "Broad Market": "#94a3b8", // slate-400
-  International:  "#38bdf8", // sky-400
-  Bonds:          "#a3e635", // lime-400
-  Commodities:    "#fcd34d", // yellow-300
-  Other:          "#64748b", // slate-500
+  Tech:       "#5eead4", // teal-300
+  Finance:    "#f59e0b", // amber-500
+  Healthcare: "#fb7185", // rose-400
+  Consumer:   "#a78bfa", // violet-400
+  Energy:     "#fb923c", // orange-400
+  Crypto:     "#60a5fa", // blue-400
+  Other:      "#64748b", // slate-500
 };
 
-const FALLBACK_PALETTE = ["#5eead4", "#a78bfa", "#f59e0b", "#fb7185", "#60a5fa", "#34d399", "#facc15", "#f472b6", "#22d3ee", "#fb923c", "#c084fc", "#94a3b8"];
-
-function colorFor(sector: string, idx: number): string {
-  return SECTOR_COLORS[sector] ?? FALLBACK_PALETTE[idx % FALLBACK_PALETTE.length];
+function colorFor(sector: string): string {
+  return SECTOR_COLORS[sector] ?? "#64748b";
 }
 
 /* ---------- Donut renderer ---------- */
@@ -127,7 +123,7 @@ export function OptimalAllocation({ holdings }: Props) {
   const { weeks, label: weeksLabel } = useLookback();
   const [investAmount, setInvestAmount] = useState<string>("1000");
 
-  // Aggregate holdings by symbol (sum values)
+  // Aggregate by symbol (sum values), pass to server
   const aggregated = useMemo(() => {
     const map = new Map<string, { symbol: string; value: number }>();
     for (const h of holdings) {
@@ -140,184 +136,115 @@ export function OptimalAllocation({ holdings }: Props) {
     return Array.from(map.values()).filter((x) => x.value > 0);
   }, [holdings]);
 
-  const symbols = aggregated.map((h) => h.symbol);
-  const totalValue = aggregated.reduce((s, h) => s + h.value, 0);
-
-  /* Sector lookup (cached by sorted symbol set) */
-  const sectorQuery = useQuery<SectorLookupResp>({
-    queryKey: ["/api/sector-lookup", symbols.sort().join(",")],
+  const optimalQuery = useQuery<OptimalResp>({
+    queryKey: [
+      "/api/optimal-allocation",
+      aggregated.map((h) => `${h.symbol}:${h.value.toFixed(0)}`).sort().join(","),
+      weeks,
+    ],
     queryFn: async () => {
-      if (!symbols.length) return { sectors: {} };
-      const res = await apiRequest("POST", "/api/sector-lookup", { symbols });
+      const res = await apiRequest("POST", "/api/optimal-allocation", {
+        holdings: aggregated,
+        weeks,
+      });
       return res.json();
     },
-    enabled: symbols.length > 0,
-    staleTime: 60 * 60 * 1000, // 1h — sectors don't change
-  });
-
-  const sectorMap = sectorQuery.data?.sectors ?? {};
-
-  /* Sentiment (returns) per symbol for the active lookback */
-  const sentimentQuery = useQuery<SentimentResult[]>({
-    queryKey: ["/api/sentiment/batch", symbols.sort().join(","), weeks],
-    queryFn: async () => {
-      if (!symbols.length) return [];
-      const res = await apiRequest("POST", "/api/sentiment/batch", { symbols, weeks });
-      return res.json();
-    },
-    enabled: symbols.length > 0,
+    enabled: aggregated.length > 0,
     staleTime: 5 * 60 * 1000,
   });
 
-  const sentMap = useMemo(() => {
-    const m = new Map<string, SentimentResult>();
-    for (const r of sentimentQuery.data ?? []) m.set(r.symbol.toUpperCase(), r);
-    return m;
-  }, [sentimentQuery.data]);
+  const lanes = optimalQuery.data?.lanes ?? [];
+  const otherWeight = optimalQuery.data?.otherWeight ?? 0;
 
-  /* Bucket by sector, computing value-weighted return per sector */
-  const sectorBuckets = useMemo(() => {
-    type Bucket = { sector: string; value: number; weightedReturnNum: number; weightedReturnDen: number; symbols: string[] };
-    const map = new Map<string, Bucket>();
-    for (const h of aggregated) {
-      const sector = sectorMap[h.symbol] ?? "Other";
-      const r = sentMap.get(h.symbol)?.returnPct;
-      const prev = map.get(sector) ?? { sector, value: 0, weightedReturnNum: 0, weightedReturnDen: 0, symbols: [] };
-      prev.value += h.value;
-      if (r != null && Number.isFinite(r)) {
-        prev.weightedReturnNum += r * h.value;
-        prev.weightedReturnDen += h.value;
-      }
-      prev.symbols.push(h.symbol);
-      map.set(sector, prev);
-    }
-    return Array.from(map.values()).map((b) => ({
-      sector: b.sector,
-      value: b.value,
-      returnPct: b.weightedReturnDen > 0 ? b.weightedReturnNum / b.weightedReturnDen : null,
-      symbols: b.symbols,
-    }));
-  }, [aggregated, sectorMap, sentMap]);
-
-  /* Current allocation by sector (weight = sector $ / total $) */
+  /* Donut slices — same canonical order both donuts */
   const currentSlices: SectorSlice[] = useMemo(() => {
-    return sectorBuckets
-      .map((b, i) => ({
-        sector: b.sector,
-        weight: totalValue > 0 ? b.value / totalValue : 0,
-        value: b.value,
-        returnPct: b.returnPct,
-        color: colorFor(b.sector, i),
-        symbols: b.symbols,
-      }))
-      .sort((a, b) => b.weight - a.weight);
-  }, [sectorBuckets, totalValue]);
+    const slices: SectorSlice[] = lanes
+      .filter((l) => l.currentWeight > 0)
+      .map((l) => ({
+        sector: l.sector,
+        weight: l.currentWeight,
+        color: colorFor(l.sector),
+        returnPct: l.sectorReturnPct,
+      }));
+    if (otherWeight > 0) {
+      slices.push({ sector: "Other", weight: otherWeight, color: colorFor("Other"), returnPct: null });
+    }
+    return slices.sort((a, b) => b.weight - a.weight);
+  }, [lanes, otherWeight]);
 
-  /* Performance-weighted optimal allocation by sector
-     - score = max(returnPct, 0) + 1  (flat = 1, +30% = 31, -10% = 1)
-     - Losing sectors keep a baseline so the book stays diversified */
   const optimalSlices: SectorSlice[] = useMemo(() => {
-    if (!sectorBuckets.length) return [];
-    const scored = sectorBuckets.map((b, i) => {
-      const r = b.returnPct ?? 0;
-      const score = Math.max(r, 0) + 1;
-      return { ...b, score, idx: i };
-    });
-    const totalScore = scored.reduce((s, x) => s + x.score, 0);
-    if (totalScore <= 0) return [];
-    return scored
-      .map((s) => ({
-        sector: s.sector,
-        weight: s.score / totalScore,
-        value: 0, // optimal donut is conceptual
-        returnPct: s.returnPct,
-        color: colorFor(s.sector, s.idx),
-        symbols: s.symbols,
+    if (!lanes.length) return [];
+    return lanes
+      .map((l) => ({
+        sector: l.sector,
+        weight: l.optimalWeight,
+        color: colorFor(l.sector),
+        returnPct: l.sectorReturnPct,
       }))
       .sort((a, b) => b.weight - a.weight);
-  }, [sectorBuckets]);
+  }, [lanes]);
 
-  /* What-if simulator: deploy $X using optimal SECTOR weights,
-     project return at the active lookback using each sector's value-weighted return. */
+  /* What-if simulator */
   const investNum = Math.max(0, parseFloat(investAmount) || 0);
   const projection = useMemo(() => {
-    if (investNum <= 0 || !optimalSlices.length) return { dollars: 0, pct: 0 };
+    if (investNum <= 0 || !lanes.length) return { dollars: 0, pct: 0 };
     let weighted = 0;
-    for (const s of optimalSlices) {
-      const r = (s.returnPct ?? 0) / 100;
-      weighted += s.weight * r;
+    for (const l of lanes) {
+      const r = (l.sectorReturnPct ?? 0) / 100;
+      weighted += l.optimalWeight * r;
     }
     return { dollars: investNum * weighted, pct: weighted * 100 };
-  }, [investNum, optimalSlices]);
+  }, [investNum, lanes]);
 
-  /* ---------- Render states ---------- */
+  if (!holdings.length) return null;
 
-  if (!holdings.length) {
-    return null;
-  }
-
-  const isLoadingSectors = sectorQuery.isLoading && !sectorQuery.data;
-  const isLoadingSentiment = sentimentQuery.isLoading && !sentimentQuery.data;
+  const isLoading = optimalQuery.isLoading && !optimalQuery.data;
 
   return (
     <section className="space-y-6" data-testid="card-optimal-allocation">
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
-          <div className="eyebrow mb-1">Optimal allocation · by sector</div>
-          <h2 className="font-display text-xl text-foreground">If you let the winning sectors lead</h2>
+          <div className="eyebrow mb-1">Optimal allocation · canonical sectors</div>
+          <h2 className="font-display text-xl text-foreground">If you let the winning lanes lead</h2>
           <p className="text-xs text-muted-foreground mt-1.5 max-w-md leading-relaxed">
-            Performance-weighted across the active <span className="font-mono text-foreground">{weeksLabel}</span> window. Sectors that lagged keep a baseline so the book stays diversified.
+            Mapped to the same six lanes as the category leaders below. Performance-weighted across the active{" "}
+            <span className="font-mono text-foreground">{weeksLabel}</span> window — lagging lanes keep a baseline so the book stays diversified.
           </p>
         </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card p-6">
-        {(isLoadingSectors || isLoadingSentiment) && !currentSlices.length ? (
+        {isLoading ? (
           <div className="py-10 text-center text-sm text-muted-foreground font-mono">Loading allocation…</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-[auto_auto_1fr] gap-8 items-start">
-            {/* Current donut */}
-            <Donut
-              slices={currentSlices}
-              label="Now"
-              sublabel="By value"
-              size={180}
-            />
+            <Donut slices={currentSlices.length ? currentSlices : [{ sector: "Other", weight: 1, color: colorFor("Other"), returnPct: null }]} label="Now" sublabel="By value" size={180} />
+            <Donut slices={optimalSlices.length ? optimalSlices : currentSlices} label="Optimal" sublabel={weeksLabel + " perf"} size={180} />
 
-            {/* Optimal donut */}
-            <Donut
-              slices={optimalSlices.length ? optimalSlices : currentSlices}
-              label="Optimal"
-              sublabel={weeksLabel + " perf"}
-              size={180}
-            />
-
-            {/* Legend + simulator */}
             <div className="space-y-5 min-w-0">
               <div>
-                <div className="eyebrow mb-2.5">Sector weights</div>
+                <div className="eyebrow mb-2.5">Lane weights · current vs optimal</div>
                 <div className="grid grid-cols-1 gap-y-1.5 text-xs">
-                  {optimalSlices.slice(0, 10).map((s) => {
-                    const cur = currentSlices.find((c) => c.sector === s.sector);
-                    const delta = s.weight - (cur?.weight ?? 0);
+                  {lanes.map((l) => {
+                    const delta = l.deltaWeight;
                     return (
                       <div
-                        key={s.sector}
+                        key={l.sector}
                         className="flex items-center gap-2 min-w-0"
-                        data-testid={`row-optimal-${s.sector.toLowerCase().replace(/\s+/g, "-")}`}
+                        data-testid={`row-optimal-${l.sector.toLowerCase().replace(/\s+/g, "-")}`}
                       >
                         <span
                           className="w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ background: s.color }}
+                          style={{ background: colorFor(l.sector) }}
                         />
-                        <span className="font-mono text-foreground truncate" title={s.symbols.join(", ")}>
-                          {s.sector}
+                        <span className="font-mono text-foreground truncate" title={l.symbols.join(", ") || "no holdings"}>
+                          {l.sector}
                         </span>
                         <span className="font-mono tabular text-muted-foreground/70 text-[10px] flex-shrink-0">
-                          {s.symbols.length} hldg{s.symbols.length !== 1 ? "s" : ""}
+                          {l.symbols.length} hldg{l.symbols.length !== 1 ? "s" : ""}
                         </span>
                         <span className="font-mono tabular text-muted-foreground ml-auto">
-                          {(s.weight * 100).toFixed(1)}%
+                          {(l.currentWeight * 100).toFixed(1)}% → {(l.optimalWeight * 100).toFixed(1)}%
                         </span>
                         <span
                           className={`font-mono tabular text-[10px] w-12 text-right ${delta >= 0 ? "text-teal" : "text-rose"}`}
@@ -327,8 +254,47 @@ export function OptimalAllocation({ holdings }: Props) {
                       </div>
                     );
                   })}
+                  {otherWeight > 0 && (
+                    <div className="flex items-center gap-2 min-w-0 opacity-70" data-testid="row-optimal-other">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: colorFor("Other") }} />
+                      <span className="font-mono text-foreground truncate">Other / off-universe</span>
+                      <span className="font-mono tabular text-muted-foreground ml-auto">
+                        {(otherWeight * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* Action chips per lane */}
+              {lanes.some((l) => l.action) && (
+                <div>
+                  <div className="eyebrow mb-2.5">What a third party would flag</div>
+                  <div className="flex flex-col gap-1.5">
+                    {lanes
+                      .filter((l) => l.action && l.action !== "On target")
+                      .slice(0, 4)
+                      .map((l) => {
+                        const positive = l.action?.startsWith("Add") || l.action?.startsWith("Underweight");
+                        return (
+                          <div
+                            key={l.sector}
+                            data-testid={`action-${l.sector.toLowerCase()}`}
+                            className="flex items-start gap-2 text-[11px] leading-snug"
+                          >
+                            <span
+                              className="font-mono text-[10px] px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5"
+                              style={{ borderColor: colorFor(l.sector), color: colorFor(l.sector) }}
+                            >
+                              {l.sector}
+                            </span>
+                            <span className={positive ? "text-teal" : "text-rose"}>{l.action}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
 
               <div className="pt-4 border-t border-border/60">
                 <div className="eyebrow mb-2.5">What-if simulator</div>
@@ -345,7 +311,7 @@ export function OptimalAllocation({ holdings }: Props) {
                       className="w-24 h-8 px-2 rounded-md border border-border bg-background text-sm font-mono tabular"
                     />
                   </div>
-                  <span className="text-xs text-muted-foreground">at optimal sector mix would have returned →</span>
+                  <span className="text-xs text-muted-foreground">at optimal lane mix would have returned →</span>
                   <div className="flex items-baseline gap-2">
                     <span
                       data-testid="text-whatif-result"
@@ -359,7 +325,7 @@ export function OptimalAllocation({ holdings }: Props) {
                   </div>
                 </div>
                 <p className="text-[10.5px] text-muted-foreground/80 mt-2 leading-relaxed">
-                  Sector returns are value-weighted across your holdings in that sector over the last {weeksLabel}. Past performance, not a forecast.
+                  Lane returns are average top-5 constituent returns over the last {weeksLabel}. Past performance, not a forecast.
                 </p>
               </div>
             </div>
