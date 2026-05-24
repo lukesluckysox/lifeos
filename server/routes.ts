@@ -2904,25 +2904,56 @@ Do not invent genres not in the input.`;
       }
 
       if (domain === "movie" || domain === "show") {
+        // TOP movie/show MUST be a genuine discovery — never something already on the user's list.
+        // We build an exclusion set from BOTH ratings (any signal: liked, disliked, watchlisted) AND
+        // user_items (manually added titles). We match on both external ID and normalized title so a
+        // manually-added entry with no TMDB id still gets filtered out.
         const tmdbKey = process.env.TMDB_API_KEY;
         if (tmdbKey) {
+          const kind = domain === "movie" ? "film" : "show";
           const path = domain === "movie" ? "trending/movie/week" : "trending/tv/week";
+
+          const norm = (s: string) =>
+            (s || "")
+              .toLowerCase()
+              .replace(/[\u2018\u2019\u201C\u201D]/g, "'")
+              .replace(/[^a-z0-9 ]+/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+
+          const [ratings, userItems] = await Promise.all([
+            storage.listRatings(userId, kind).catch(() => [] as any[]),
+            storage.listUserItems(userId, kind).catch(() => [] as any[]),
+          ]);
+          const seenIds = new Set<string>();
+          const seenTitles = new Set<string>();
+          for (const r of ratings) {
+            if (r.externalId) seenIds.add(String(r.externalId));
+            if (r.title) seenTitles.add(norm(r.title));
+          }
+          // user_items has no external_id — title-only match.
+          for (const u of userItems) {
+            if (u.title) seenTitles.add(norm(u.title));
+          }
+
           try {
             const r = await fetch(`https://api.themoviedb.org/3/${path}?api_key=${tmdbKey}`);
             if (r.ok) {
               const j: any = await r.json();
               const items: any[] = Array.isArray(j.results) ? j.results : [];
-              const ratings = await storage.listRatings(userId, domain === "movie" ? "film" : "show").catch(() => [] as any[]);
-              const seenIds = new Set(ratings.map((r: any) => r.externalId));
-              const unseen = items.find((it) => !seenIds.has(String(it.id)));
-              if (unseen) {
-                const title = unseen.title || unseen.name;
-                const date = (unseen.release_date || unseen.first_air_date || "").slice(0, 4);
+              const fresh = items.find((it) => {
+                const idMatch = seenIds.has(String(it.id));
+                const titleMatch = seenTitles.has(norm(it.title || it.name || ""));
+                return !idMatch && !titleMatch;
+              });
+              if (fresh) {
+                const title = fresh.title || fresh.name;
+                const date = (fresh.release_date || fresh.first_air_date || "").slice(0, 4);
                 candidate = {
                   title,
-                  subtitle: [unseen.vote_average ? `★ ${unseen.vote_average.toFixed(1)}` : null, date].filter(Boolean).join(" · "),
-                  image: unseen.poster_path ? `https://image.tmdb.org/t/p/w200${unseen.poster_path}` : undefined,
-                  url: `https://www.themoviedb.org/${domain === "movie" ? "movie" : "tv"}/${unseen.id}`,
+                  subtitle: [fresh.vote_average ? `★ ${fresh.vote_average.toFixed(1)}` : null, date].filter(Boolean).join(" · "),
+                  image: fresh.poster_path ? `https://image.tmdb.org/t/p/w200${fresh.poster_path}` : undefined,
+                  url: `https://www.themoviedb.org/${domain === "movie" ? "movie" : "tv"}/${fresh.id}`,
                   signal: `top trending this week in ${domain === "movie" ? "film" : "TV"}, not yet on your list`,
                   source: "tmdb",
                 };
