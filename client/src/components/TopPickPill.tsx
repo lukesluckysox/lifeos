@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, Sparkles } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useMode } from "./ModeProvider";
+import { useLocation as useCity } from "./LocationProvider";
 
 export type TopPickDomain = "stock" | "artist" | "movie" | "show" | "place" | "event";
 
@@ -29,13 +30,27 @@ const DOMAIN_LABEL: Record<TopPickDomain, string> = {
 /**
  * Compact horizontal pill — a single TOP recommendation per domain.
  * Editorial, sparse, dark-first. Sits below its section, never as a hero.
+ *
+ * Each pill is referential to its category:
+ *   - stock / artist / movie / show → anchored to user data in that category
+ *   - place / event                 → anchored to the currently selected city
  */
 export function TopPickPill({ domain, className = "" }: { domain: TopPickDomain; className?: string }) {
   const { mode, withMode } = useMode();
+  const { city } = useCity();
+
+  // Only place + event are city-scoped — sending city for the others would
+  // cause needless cache splits when the user changes locations.
+  const cityScoped = domain === "place" || domain === "event";
+  const cityForQuery = cityScoped ? city : "";
+
   const { data, isLoading } = useQuery<TopPickResp>({
-    queryKey: ["/api/top-picks", domain, mode],
-    queryFn: async () =>
-      (await apiRequest("GET", withMode(`/api/top-picks?domain=${domain}`))).json(),
+    queryKey: ["/api/top-picks", domain, mode, cityForQuery],
+    queryFn: async () => {
+      const params = new URLSearchParams({ domain });
+      if (cityScoped && city) params.set("city", city);
+      return (await apiRequest("GET", withMode(`/api/top-picks?${params.toString()}`))).json();
+    },
   });
 
   // Skeleton state — soft, no heavy chrome

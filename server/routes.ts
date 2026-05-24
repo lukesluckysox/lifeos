@@ -2777,21 +2777,43 @@ Do not invent genres not in the input.`;
       const userId = req.user?.id;
       const mode = (req.query.mode as string | undefined) === "demo" ? "demo" : "live";
       const refresh = req.query.refresh === "1";
+      // Optional city override — used by location-bound domains (place, event)
+      // so the pill always reflects the city the user actually has selected,
+      // not whichever city happens to sit at the top of their food-spots list.
+      const cityParam = ((req.query.city as string | undefined) || "").trim();
 
       // ── Demo fallback fixtures so the UI looks alive without a connected account.
       if (mode === "demo" || !userId) {
+        // For place/event, swap in the user's selected city so demo mode is also referential.
+        const demoCity = cityParam || "Honolulu";
         const demo: Record<string, TopPick> = {
           stock: { domain, title: "NVDA", subtitle: "NVIDIA Corporation", why: "Your largest weighted position riding the AI buildout.", source: "demo", asOf: new Date().toISOString() },
           artist: { domain, title: "Stick Figure", subtitle: "Reggae", why: "Heaviest in your rotation this month.", source: "demo", asOf: new Date().toISOString() },
           movie: { domain, title: "Dune: Part Three", subtitle: "Sci-fi · 2026", why: "Tracks the slow-burn epics you've rated highly.", source: "demo", asOf: new Date().toISOString() },
           show: { domain, title: "Severance", subtitle: "Apple TV+", why: "Matches your taste for cerebral thrillers.", source: "demo", asOf: new Date().toISOString() },
-          place: { domain, title: "Maku‘u Farmers Market", subtitle: "Pahoa, Hawaii", why: "On your Atlas path and matches your weekend rhythm.", source: "demo", asOf: new Date().toISOString() },
-          event: { domain, title: "Iya Terra at The Republik", subtitle: "Honolulu · Jun 14", why: "Reggae act you've followed, in your city.", source: "demo", asOf: new Date().toISOString() },
+          place: {
+            domain,
+            title: demoCity === "Honolulu" ? "Maku‘u Farmers Market" : `Iconic spot in ${demoCity}`,
+            subtitle: demoCity === "Honolulu" ? "Pahoa, Hawaii" : demoCity,
+            why: `Top of your saved places near ${demoCity}.`,
+            source: "demo",
+            asOf: new Date().toISOString(),
+          },
+          event: {
+            domain,
+            title: demoCity === "Honolulu" ? "Iya Terra at The Republik" : `Top show in ${demoCity}`,
+            subtitle: `${demoCity} · Jun 14`,
+            why: `Next upcoming event in ${demoCity} matched to your taste.`,
+            source: "demo",
+            asOf: new Date().toISOString(),
+          },
         };
         return res.json(demo[domain]);
       }
 
-      const cacheKey = `${userId}::${domain}`;
+      // Include city in cache key for city-scoped domains so switching city refreshes the pill.
+      const cityScoped = domain === "place" || domain === "event";
+      const cacheKey = `${userId}::${domain}${cityScoped && cityParam ? `::${cityParam.toLowerCase()}` : ""}`;
       if (!refresh) {
         const hit = topPickCache.get(cacheKey);
         if (hit && Date.now() - hit.ts < TOP_PICK_TTL_MS) {
@@ -2911,44 +2933,85 @@ Do not invent genres not in the input.`;
       }
 
       if (domain === "place") {
-        // Prefer an Atlas path that's near-future or recently added; fall back to saved food spot.
+        // Place pill is city-referential. Priority:
+        //   1. Saved place actually IN the selected city (food spot)
+        //   2. Atlas path matching the city
+        //   3. Any Atlas path (next-scheduled, then first)
+        //   4. Any saved food spot
+        const cityLc = cityParam.toLowerCase();
+        const spots = await storage.listFoodSpots(userId).catch(() => [] as any[]);
         const link = await storage.getAtlasLink(userId).catch(() => null);
+        let atlasPaths: any[] = [];
         if (link) {
           try {
-            const { paths } = await fetchAtlasPathsForUser(link.atlasUserId, { force: false });
-            const future = (paths || []).find((p: any) => p.scheduledFor && new Date(p.scheduledFor) > new Date());
-            const pick = future || (paths || [])[0];
-            if (pick) {
-              candidate = {
-                title: pick.title || pick.name || "Untitled path",
-                subtitle: pick.location || pick.city || undefined,
-                url: atlasShareUrl(pick.id),
-                signal: future ? `next scheduled stop on your Atlas` : `top of your Atlas paths`,
-                source: "atlas",
-              };
-            }
+            const result = await fetchAtlasPathsForUser(link.atlasUserId, { force: false });
+            atlasPaths = result.paths || [];
           } catch { /* ignore */ }
         }
-        if (!candidate) {
-          const spots = await storage.listFoodSpots(userId).catch(() => [] as any[]);
-          if (spots.length) {
-            const pick = spots[0];
+
+        // Step 1: saved food spot in the selected city.
+        if (cityLc) {
+          const inCity = spots.find((s: any) => (s.city || "").toLowerCase().includes(cityLc));
+          if (inCity) {
             candidate = {
-              title: pick.name,
-              subtitle: pick.city || pick.cuisine,
-              url: pick.url || undefined,
-              signal: `top of your saved places`,
+              title: inCity.name,
+              subtitle: inCity.city || inCity.cuisine,
+              url: inCity.url || undefined,
+              signal: `your saved place in ${cityParam}`,
               source: "food-spots",
             };
           }
+        }
+
+        // Step 2: Atlas path that mentions the selected city.
+        if (!candidate && cityLc && atlasPaths.length) {
+          const inCity = atlasPaths.find((p: any) => {
+            const blob = `${p.title || ""} ${p.name || ""} ${p.location || ""} ${p.city || ""}`.toLowerCase();
+            return blob.includes(cityLc);
+          });
+          if (inCity) {
+            candidate = {
+              title: inCity.title || inCity.name || "Untitled path",
+              subtitle: inCity.location || inCity.city || undefined,
+              url: atlasShareUrl(inCity.id),
+              signal: `your Atlas stop in ${cityParam}`,
+              source: "atlas",
+            };
+          }
+        }
+
+        // Step 3: any Atlas path (next-scheduled first).
+        if (!candidate && atlasPaths.length) {
+          const future = atlasPaths.find((p: any) => p.scheduledFor && new Date(p.scheduledFor) > new Date());
+          const pick = future || atlasPaths[0];
+          candidate = {
+            title: pick.title || pick.name || "Untitled path",
+            subtitle: pick.location || pick.city || undefined,
+            url: atlasShareUrl(pick.id),
+            signal: future ? `next scheduled stop on your Atlas` : `top of your Atlas paths`,
+            source: "atlas",
+          };
+        }
+
+        // Step 4: any saved food spot.
+        if (!candidate && spots.length) {
+          const pick = spots[0];
+          candidate = {
+            title: pick.name,
+            subtitle: pick.city || pick.cuisine,
+            url: pick.url || undefined,
+            signal: `top of your saved places`,
+            source: "food-spots",
+          };
         }
       }
 
       if (domain === "event") {
         if (TM_KEY) {
-          // Use the user's last-known city via their food spots if available, else Honolulu fallback.
+          // Event pill is city-referential. Use the explicitly selected city first;
+          // fall back to food-spots city; finally Honolulu.
           const spots = await storage.listFoodSpots(userId).catch(() => [] as any[]);
-          const city = (spots[0]?.city as string) || "Honolulu";
+          const city = cityParam || (spots[0]?.city as string) || "Honolulu";
           try {
             const tmUrl = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TM_KEY}&city=${encodeURIComponent(city)}&size=10&sort=date,asc`;
             const r = await fetch(tmUrl);
