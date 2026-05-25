@@ -16,6 +16,10 @@ interface TopPickResp {
   source: string;
   asOf?: string;
   reason?: string;
+  // Server-side honesty signal. "high" = anchored to real user/live data.
+  // "low"  = editorial fallback. Server only emits low-confidence pills when
+  // explicitly requested; this field is here for future opt-ins.
+  confidence?: "high" | "low";
 }
 
 const DOMAIN_LABEL: Record<TopPickDomain, string> = {
@@ -35,7 +39,23 @@ const DOMAIN_LABEL: Record<TopPickDomain, string> = {
  *   - stock / artist / movie / show → anchored to user data in that category
  *   - place / event                 → anchored to the currently selected city
  */
-export function TopPickPill({ domain, className = "", compact = false }: { domain: TopPickDomain; className?: string; compact?: boolean }) {
+/**
+ * `showLowConfidence` (default false): when true, the pill renders editorial
+ * fallbacks (the server-side curated nudges) for users with no data in this
+ * domain. Default off matches the honesty rule — don't fake a pick if we
+ * don't have one.
+ */
+export function TopPickPill({
+  domain,
+  className = "",
+  compact = false,
+  showLowConfidence = false,
+}: {
+  domain: TopPickDomain;
+  className?: string;
+  compact?: boolean;
+  showLowConfidence?: boolean;
+}) {
   const { mode, withMode } = useMode();
   const { city } = useCity();
 
@@ -45,10 +65,11 @@ export function TopPickPill({ domain, className = "", compact = false }: { domai
   const cityForQuery = cityScoped ? city : "";
 
   const { data, isLoading } = useQuery<TopPickResp>({
-    queryKey: ["/api/top-picks", domain, mode, cityForQuery],
+    queryKey: ["/api/top-picks", domain, mode, cityForQuery, showLowConfidence],
     queryFn: async () => {
       const params = new URLSearchParams({ domain });
       if (cityScoped && city) params.set("city", city);
+      if (showLowConfidence) params.set("showLowConfidence", "1");
       return (await apiRequest("GET", withMode(`/api/top-picks?${params.toString()}`))).json();
     },
   });
@@ -68,8 +89,10 @@ export function TopPickPill({ domain, className = "", compact = false }: { domai
     );
   }
 
-  // Empty / no-data state — don't render a noisy pill, render nothing
+  // Empty / no-data state — don't render a noisy pill, render nothing.
+  // Also hide low-confidence editorial fallbacks unless the caller opted in.
   if (!data || data.source === "empty" || !data.title) return null;
+  if (data.confidence === "low" && !showLowConfidence) return null;
 
   const inner = (
     <>
