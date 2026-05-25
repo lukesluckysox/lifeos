@@ -13,6 +13,24 @@ import { seedEvents, type SeedEvent } from "./events-seed";
 import { requireAuth, optionalAuth, setSessionCookie, clearSessionCookie } from "./auth";
 import { fetchAtlasPathsForUser, atlasShareUrl, atlasServerConfigured, atlasBaseUrl, exchangeAtlasCode, invalidateAtlasCache } from "./atlas";
 import { randomUUID } from "node:crypto";
+import { makeCache, TTL } from "./cache";
+import {
+  analyzeSeries,
+  scoreToLabel,
+  type SeriesAnalysis,
+  type SignalReason,
+  type Factors,
+} from "./finance/indicators";
+import {
+  SECTOR_UNIVERSE as SECTOR_UNIVERSE_SHARED,
+  SYMBOL_TO_SECTOR_CURATED as SYMBOL_TO_SECTOR_CURATED_SHARED,
+  ETF_SECTOR_HINTS as ETF_SECTOR_HINTS_SHARED,
+  isCryptoSymbol,
+  normalizeYahooSector as normalizeYahooSectorShared,
+  yahooSymbol as yahooSymbolShared,
+  computeOptimalAllocation,
+  CANONICAL_SECTORS,
+} from "./finance/sectors";
 
 const TMDB_KEY = process.env.TMDB_API_KEY;
 const TM_KEY = process.env.TICKETMASTER_API_KEY;
@@ -1062,8 +1080,7 @@ export async function registerRoutes(
   //
   // Cache: per-user, TTL 6h. Mood doesn't shift hour to hour.
 
-  const moodCache = new Map<number, { ts: number; payload: any }>();
-  const MOOD_TTL_MS = 6 * 60 * 60 * 1000;
+  const moodCache = makeCache<any>("music-mood", { ttlMs: TTL.HOUR_6, maxEntries: 10000 });
 
   app.get("/api/music-mood", optionalAuth, async (req, res) => {
     try {
@@ -1088,9 +1105,10 @@ export async function registerRoutes(
       }
 
       // Cache hit?
-      const hit = moodCache.get(userId);
-      if (hit && Date.now() - hit.ts < MOOD_TTL_MS && !req.query.refresh) {
-        return res.json(hit.payload);
+      const moodKey = String(userId);
+      const hit = req.query.refresh ? undefined : moodCache.peek(moodKey);
+      if (hit) {
+        return res.json(hit);
       }
 
       // Pull recent + rotation genre rollups in parallel — they're our signal.
@@ -1108,8 +1126,10 @@ export async function registerRoutes(
       }
 
       const anthropicKey = process.env.ANTHROPIC_API_KEY;
-      if (!anthropicKey) {
-        // Graceful fallback — naive heuristic so the strip isn't empty.
+      const claudeCopyOn = process.env.RADIUS_CLAUDE_COPY === "1";
+      if (!anthropicKey || !claudeCopyOn) {
+        // Default path: deterministic heuristic. Claude is opt-in via
+        // RADIUS_CLAUDE_COPY=1 — keeps tone consistent and saves credits.
         const top = [...rotationGenres, ...recentGenres].slice(0, 5).map(g => g.genre);
         return res.json({
           source: "heuristic",
@@ -1118,7 +1138,6 @@ export async function registerRoutes(
           delta: 0,
           drivers: top,
           asOf: new Date().toISOString(),
-          note: "ANTHROPIC_API_KEY not set — heuristic fallback.",
         });
       }
 
@@ -1200,7 +1219,7 @@ Do not invent genres not in the input.`;
         asOf: new Date().toISOString(),
       };
 
-      moodCache.set(userId, { ts: Date.now(), payload });
+      moodCache.set(moodKey, payload);
       res.json(payload);
     } catch (e: any) {
       console.error("music-mood error:", e.message);
@@ -1346,8 +1365,7 @@ Do not invent genres not in the input.`;
   //     cc: "US", display: "Honolulu, Hawaii, United States",
   //     lat: 21.30, lon: -157.86 }, ...]
 
-  const citySearchCache = new Map<string, { ts: number; items: any[] }>();
-  const CITY_TTL_MS = 60 * 60 * 1000; // 1h
+  const citySearchCache = makeCache<any[]>("city-search", { ttlMs: TTL.HOUR_1, maxEntries: 500 });
   const CITY_TYPES = new Set(["city", "town", "village", "suburb", "neighbourhood", "municipality", "locality"]);
 
   app.get("/api/places/city-search", async (req, res) => {
@@ -1356,9 +1374,9 @@ Do not invent genres not in the input.`;
       if (q.length < 2) return res.json({ items: [] });
 
       const key = q.toLowerCase();
-      const cached = citySearchCache.get(key);
-      if (cached && Date.now() - cached.ts < CITY_TTL_MS) {
-        return res.json({ items: cached.items, cached: true });
+      const cached = citySearchCache.peek(key);
+      if (cached) {
+        return res.json({ items: cached, cached: true });
       }
 
       // limit=15 because we filter aggressively below; final UI shows ~8.
@@ -1398,12 +1416,7 @@ Do not invent genres not in the input.`;
           lon: x.lon,
         }));
 
-      citySearchCache.set(key, { ts: Date.now(), items });
-      // Trim cache if it gets large.
-      if (citySearchCache.size > 500) {
-        const oldest = [...citySearchCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
-        if (oldest) citySearchCache.delete(oldest);
-      }
+      citySearchCache.set(key, items);
       res.json({ items });
     } catch (e: any) {
       console.warn("[city-search] error:", e?.message);
@@ -2103,248 +2116,58 @@ Do not invent genres not in the input.`;
   // Sentiment engine
   // ══════════════════════════════════════════════════════════════════════════
 
-  // In-memory cache: `${symbol}:${weeks}` → { data, expiresAt }
-  const sentimentCache = new Map<string, { data: SentimentResult; expiresAt: number }>();
-  const SENTIMENT_TTL = 5 * 60 * 1000; // 5 minutes
-
-  interface SignalReason {
-    tag: string;          // short chip text, e.g. "RSI 78"
-    weight: number;       // -1..+1 — how much this nudges the composite
-    detail?: string;      // longer tooltip / explainer
-  }
-
-  interface SentimentResult {
-    symbol: string;
-    currentPrice: number | null;
-    returnPct: number | null;
-    sentiment: number;     // composite -1..+1
-    label: string;         // Strong Buy / Buy / Hold / Sell / Strong Sell
-    // New fields — additive, safe for older clients
-    reasons?: SignalReason[];
-    factors?: {
-      momentum: number | null;     // -1..+1 derived from return
-      trend: number | null;        // -1..+1 from price vs 50d SMA
-      drawdown: number | null;     // -1..+1 from % off lookback high (negative = far off high)
-      rsi: number | null;          // raw 0..100
-      rsiSignal: number | null;    // -1..+1 (high RSI = bearish/overbought)
-      volatilityPct: number | null;// annualized stdev of daily returns, in %
-      sharpe: number | null;       // return / volatility (mini)
-    };
-    action?: string;       // poignant one-liner, e.g. "Trim — overbought, momentum rolling over"
-    conviction?: number;   // 1..3 (stars)
-  }
-
-  function scoreToLabel(s: number): string {
-    if (s >= 0.6)  return "Strong Buy";
-    if (s >= 0.2)  return "Buy";
-    if (s > -0.2)  return "Hold";
-    if (s > -0.6)  return "Sell";
-    return "Strong Sell";
-  }
-
-  function clamp(n: number, lo = -1, hi = 1): number { return Math.max(lo, Math.min(hi, n)); }
-
-  function sma(arr: number[], n: number): number | null {
-    if (arr.length < n) return null;
-    let s = 0;
-    for (let i = arr.length - n; i < arr.length; i++) s += arr[i];
-    return s / n;
-  }
-
-  // Wilder's RSI(14) — industry standard
-  function rsi(arr: number[], n = 14): number | null {
-    if (arr.length <= n) return null;
-    let gains = 0, losses = 0;
-    for (let i = 1; i <= n; i++) {
-      const d = arr[i] - arr[i - 1];
-      if (d >= 0) gains += d; else losses -= d;
-    }
-    let avgG = gains / n;
-    let avgL = losses / n;
-    for (let i = n + 1; i < arr.length; i++) {
-      const d = arr[i] - arr[i - 1];
-      const g = d > 0 ? d : 0;
-      const l = d < 0 ? -d : 0;
-      avgG = (avgG * (n - 1) + g) / n;
-      avgL = (avgL * (n - 1) + l) / n;
-    }
-    if (avgL === 0) return 100;
-    const rs = avgG / avgL;
-    return 100 - 100 / (1 + rs);
-  }
-
-  function dailyVolPct(arr: number[]): number | null {
-    if (arr.length < 5) return null;
-    const rets: number[] = [];
-    for (let i = 1; i < arr.length; i++) {
-      if (arr[i - 1] > 0) rets.push((arr[i] - arr[i - 1]) / arr[i - 1]);
-    }
-    if (rets.length < 2) return null;
-    const mean = rets.reduce((s, x) => s + x, 0) / rets.length;
-    const variance = rets.reduce((s, x) => s + (x - mean) ** 2, 0) / (rets.length - 1);
-    // annualized stdev in %
-    return Math.sqrt(variance) * Math.sqrt(252) * 100;
-  }
-
-  function returnPctToMomentum(pct: number): number {
-    // smoother than step-function: tanh keeps ±30% near saturation
-    return clamp(Math.tanh(pct / 20));
-  }
-
-  function buildActionLine(label: string, factors: NonNullable<SentimentResult["factors"]>): string {
-    const { rsi: rsiV, trend, drawdown, momentum } = factors;
-    const overbought = rsiV != null && rsiV >= 70;
-    const oversold = rsiV != null && rsiV <= 30;
-    const aboveTrend = (trend ?? 0) > 0.1;
-    const belowTrend = (trend ?? 0) < -0.1;
-    const farOffHigh = (drawdown ?? 0) < -0.4;
-    const momentumUp = (momentum ?? 0) > 0.3;
-    const momentumDown = (momentum ?? 0) < -0.3;
-
-    if (label === "Strong Buy") {
-      if (oversold) return "Accumulate — beaten down, oversold, mean-reversion setup.";
-      if (aboveTrend && momentumUp) return "Add on weakness — trend intact, momentum durable.";
-      return "Accumulate — multiple factors lining up bullish.";
-    }
-    if (label === "Buy") {
-      if (aboveTrend) return "Lean in — above the 50-day, breathing room before overbought.";
-      if (oversold) return "Probe a starter — oversold but trend hasn't confirmed yet.";
-      return "Lean in modestly — signals tilt positive, not euphoric.";
-    }
-    if (label === "Sell") {
-      if (overbought) return "Trim — extended on RSI, risk/reward is asymmetric here.";
-      if (belowTrend && momentumDown) return "Lighten up — below the 50-day, momentum has rolled.";
-      return "Tighten the leash — factors tilting unfavorable.";
-    }
-    if (label === "Strong Sell") {
-      if (overbought && farOffHigh) return "Take profits — exhausted move and structural damage.";
-      if (belowTrend) return "Cut size — trend broken, no factor defending it.";
-      return "Reduce — broad-based deterioration.";
-    }
-    // Hold
-    if (overbought) return "Hold but don't add — overbought without trend rolling yet.";
-    if (oversold) return "Hold and watch — oversold but no reversal signal yet.";
-    if (farOffHigh) return "Hold — well off the highs, waiting for a base.";
-    return "Hold — mixed signals, no edge either way.";
-  }
+  // Sentiment: pure math lives in server/finance/indicators.ts and is unit-tested.
+  // This route adapts the analysis to the wire format (adds `symbol`) and caches
+  // the result for 5 minutes per `(symbol, weeks)`.
+  type SentimentResult = SeriesAnalysis & { symbol: string };
+  const sentimentCache = makeCache<SentimentResult>("sentiment", {
+    ttlMs: TTL.MIN_5,
+    maxEntries: 2000,
+  });
 
   async function fetchSentiment(symbol: string, weeks: number): Promise<SentimentResult> {
-    const cacheKey = `${symbol}:${weeks}`;
-    const cached = sentimentCache.get(cacheKey);
-    if (cached && Date.now() < cached.expiresAt) return cached.data;
-
-    try {
-      // Yahoo's `range` only accepts presets (1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max).
-      // Always fetch 1y of daily candles, then slice locally by `weeks * 5` trading days.
-      const r = await fetch(
-        `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d`,
-        { headers: { "User-Agent": "Mozilla/5.0" } }
-      );
-      if (!r.ok) throw new Error(`Yahoo ${r.status}`);
-      const data = await r.json();
-      const result = data?.chart?.result?.[0];
-      if (!result) throw new Error("no result");
-      const meta = result.meta;
-      const closesAll: number[] = (result.indicators?.quote?.[0]?.close ?? []).filter((c: any) => c != null);
-      if (!closesAll.length) throw new Error("no closes");
-      const tradingDays = Math.max(5, Math.round(weeks * 5));
-      const sliced = closesAll.slice(Math.max(0, closesAll.length - tradingDays));
-      const first = sliced[0];
-      const last = meta.regularMarketPrice ?? sliced[sliced.length - 1];
-      const returnPct = first > 0 ? ((last - first) / first) * 100 : 0;
-
-      // ── Factor: momentum (return over window) ──────────────────────
-      const momentum = returnPctToMomentum(returnPct);
-
-      // ── Factor: trend (price vs 50-day SMA on full 1y series) ──────
-      const sma50 = sma(closesAll, 50);
-      const trendPct = sma50 ? ((last - sma50) / sma50) * 100 : null; // signed % above/below
-      const trend = trendPct != null ? clamp(Math.tanh(trendPct / 8)) : null;
-
-      // ── Factor: drawdown from window high ─────────────────────────
-      const windowHigh = sliced.reduce((m, c) => (c > m ? c : m), -Infinity);
-      const drawdownPct = windowHigh > 0 ? ((last - windowHigh) / windowHigh) * 100 : 0; // <=0
-      // map 0 → 0 (at high), -10% → -0.3, -30% → -0.85, -50% → -1
-      const drawdown = clamp(Math.tanh(drawdownPct / 20));
-
-      // ── Factor: RSI(14) on full series for stability ──────────────
-      const rsiV = rsi(closesAll, 14);
-      // overbought 70+ → bearish; oversold 30- → bullish (mean reversion)
-      // map 50→0, 70→-0.5, 30→+0.5, 80→-0.8, 20→+0.8
-      const rsiSignal = rsiV != null ? clamp((50 - rsiV) / 25) : null;
-
-      // ── Factor: volatility / mini-Sharpe ──────────────────────────
-      const volatilityPct = dailyVolPct(sliced);
-      const sharpe = volatilityPct && volatilityPct > 0 ? returnPct / volatilityPct : null;
-
-      // ── Composite (weighted average of available factors) ─────────
-      const FACTOR_WEIGHTS: Record<string, number> = {
-        momentum: 0.35,
-        trend:    0.25,
-        drawdown: 0.15,  // small — being off-high isn't directional on its own
-        rsiSignal:0.25,
-      };
-      let num = 0, den = 0;
-      const factorMap: Record<string, number | null> = { momentum, trend, drawdown, rsiSignal };
-      for (const [k, w] of Object.entries(FACTOR_WEIGHTS)) {
-        const v = factorMap[k];
-        if (v != null && Number.isFinite(v)) { num += v * w; den += w; }
+    return sentimentCache.getOrSet(`${symbol}:${weeks}`, async () => {
+      try {
+        // Yahoo's `range` only accepts presets (1d, 5d, 1mo, 3mo, 6mo, 1y, ...).
+        // Always fetch 1y of daily candles, then let analyzeSeries slice locally.
+        const r = await fetch(
+          `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d`,
+          { headers: { "User-Agent": "Mozilla/5.0" } }
+        );
+        if (!r.ok) throw new Error(`Yahoo ${r.status}`);
+        const data = await r.json();
+        const result = data?.chart?.result?.[0];
+        if (!result) throw new Error("no result");
+        const closesAll: number[] = (result.indicators?.quote?.[0]?.close ?? []).filter(
+          (c: any) => c != null
+        );
+        if (!closesAll.length) throw new Error("no closes");
+        const tradingDays = Math.max(5, Math.round(weeks * 5));
+        const latest = result.meta?.regularMarketPrice ?? undefined;
+        const analysis = analyzeSeries(closesAll, tradingDays, latest);
+        return { symbol, ...analysis };
+      } catch {
+        return {
+          symbol,
+          currentPrice: null,
+          returnPct: null,
+          sentiment: 0,
+          label: "Hold" as const,
+          reasons: [],
+          factors: {
+            momentum: null,
+            trend: null,
+            drawdown: null,
+            rsi: null,
+            rsiSignal: null,
+            volatilityPct: null,
+            sharpe: null,
+          },
+          action: "No data available.",
+          conviction: 1 as const,
+        };
       }
-      const composite = den > 0 ? clamp(num / den) : 0;
-
-      // ── Reasons (top 2-3 strongest signed factors) ────────────────
-      const reasons: SignalReason[] = [];
-      if (rsiV != null) {
-        if (rsiV >= 70) reasons.push({ tag: `RSI ${rsiV.toFixed(0)} · overbought`, weight: -((rsiV - 70) / 30), detail: "RSI above 70 historically precedes pullbacks." });
-        else if (rsiV <= 30) reasons.push({ tag: `RSI ${rsiV.toFixed(0)} · oversold`, weight: ((30 - rsiV) / 30), detail: "RSI below 30 often marks mean-reversion setups." });
-      }
-      if (trendPct != null) {
-        if (trendPct >= 3) reasons.push({ tag: `+${trendPct.toFixed(1)}% above 50-day`, weight: clamp(trendPct / 15), detail: "Trading above the 50-day SMA — uptrend intact." });
-        else if (trendPct <= -3) reasons.push({ tag: `${trendPct.toFixed(1)}% below 50-day`, weight: clamp(trendPct / 15), detail: "Below the 50-day SMA — downtrend in force." });
-      }
-      if (Math.abs(returnPct) >= 5) {
-        reasons.push({
-          tag: `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)}% this window`,
-          weight: momentum,
-          detail: `Total return over the active lookback.`,
-        });
-      }
-      if (drawdownPct <= -10) {
-        reasons.push({ tag: `${drawdownPct.toFixed(0)}% off window high`, weight: drawdown, detail: "Distance from the highest close in the window." });
-      }
-      if (sharpe != null && Math.abs(sharpe) >= 0.5) {
-        reasons.push({
-          tag: `${sharpe >= 0 ? "+" : ""}${sharpe.toFixed(2)} return/vol`,
-          weight: clamp(sharpe / 3),
-          detail: "Mini risk-adjusted return — return divided by annualized volatility.",
-        });
-      }
-      // sort by absolute weight, keep top 3
-      reasons.sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
-      const topReasons = reasons.slice(0, 3);
-
-      const label = scoreToLabel(composite);
-      const factors = { momentum, trend, drawdown, rsi: rsiV, rsiSignal, volatilityPct, sharpe };
-      const action = buildActionLine(label, factors);
-      const conviction = Math.abs(composite) >= 0.6 ? 3 : Math.abs(composite) >= 0.3 ? 2 : 1;
-
-      const out: SentimentResult = {
-        symbol,
-        currentPrice: last,
-        returnPct,
-        sentiment: composite,
-        label,
-        reasons: topReasons,
-        factors,
-        action,
-        conviction,
-      };
-      sentimentCache.set(cacheKey, { data: out, expiresAt: Date.now() + SENTIMENT_TTL });
-      return out;
-    } catch {
-      const out: SentimentResult = { symbol, currentPrice: null, returnPct: null, sentiment: 0, label: "Hold", reasons: [], factors: { momentum: null, trend: null, drawdown: null, rsi: null, rsiSignal: null, volatilityPct: null, sharpe: null }, action: "No data available.", conviction: 1 };
-      return out;
-    }
+    });
   }
 
   app.get("/api/sentiment/:symbol", async (req, res) => {
@@ -2382,8 +2205,7 @@ Do not invent genres not in the input.`;
     weeks: number;
   }
 
-  const chartCache = new Map<string, { data: ChartHistory; expiresAt: number }>();
-  const CHART_TTL = 5 * 60 * 1000;
+  const chartCache = makeCache<ChartHistory>("chart-history", { ttlMs: TTL.MIN_5, maxEntries: 2000 });
 
   function downsample(arr: number[], maxPoints = 60): number[] {
     if (arr.length <= maxPoints) return arr;
@@ -2396,8 +2218,8 @@ Do not invent genres not in the input.`;
 
   async function fetchChartHistory(symbol: string, weeks: number): Promise<ChartHistory> {
     const cacheKey = `${symbol}:${weeks}`;
-    const cached = chartCache.get(cacheKey);
-    if (cached && Date.now() < cached.expiresAt) return cached.data;
+    const cached = chartCache.peek(cacheKey);
+    if (cached) return cached;
 
     try {
       // Always fetch 1y so we can derive YTD locally
@@ -2442,7 +2264,7 @@ Do not invent genres not in the input.`;
         closes: downsample(sliced.map((p) => p.c)),
         weeks,
       };
-      chartCache.set(cacheKey, { data: out, expiresAt: Date.now() + CHART_TTL });
+      chartCache.set(cacheKey, out);
       return out;
     } catch {
       return {
@@ -2482,65 +2304,22 @@ Do not invent genres not in the input.`;
   // Category leaders (sector trophy cards)
   // ══════════════════════════════════════════════════════════════════════════
 
-  // Curated universe — symbol → sector. Kept tight on purpose so each batch
-  // is fast and cache-friendly.
-  const SECTOR_UNIVERSE: Record<string, string[]> = {
-    "Tech":       ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA", "AMD", "ORCL", "CRM"],
-    "Finance":    ["JPM", "BAC", "WFC", "GS", "MS", "BLK", "SCHW", "V", "MA", "AXP"],
-    "Healthcare": ["LLY", "UNH", "JNJ", "ABBV", "PFE", "MRK", "TMO", "ABT", "DHR", "ISRG"],
-    "Consumer":   ["WMT", "COST", "HD", "NKE", "MCD", "SBUX", "PG", "KO", "PEP", "DIS"],
-    "Energy":     ["XOM", "CVX", "COP", "SLB", "EOG", "OXY", "PSX", "MPC", "VLO", "HES"],
-    "Crypto":     ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "LINK", "DOT", "MATIC"],
-  };
+  // Sector constants + symbol→sector lookup live in server/finance/sectors.ts.
+  // Re-aliased here so the rest of routes.ts reads cleanly. The cache-backed
+  // live lookup falls back to Yahoo's quoteSummary for off-curated symbols.
+  const SECTOR_UNIVERSE = SECTOR_UNIVERSE_SHARED;
+  const SYMBOL_TO_SECTOR_CURATED = SYMBOL_TO_SECTOR_CURATED_SHARED;
+  const ETF_SECTOR_HINTS = ETF_SECTOR_HINTS_SHARED;
+  const normalizeYahooSector = normalizeYahooSectorShared;
+  const yahooSymbol = yahooSymbolShared;
 
-  // Reverse index: symbol -> sector (from curated map above)
-  const SYMBOL_TO_SECTOR_CURATED: Record<string, string> = (() => {
-    const m: Record<string, string> = {};
-    for (const [sector, syms] of Object.entries(SECTOR_UNIVERSE)) {
-      for (const s of syms) m[s.toUpperCase()] = sector;
-    }
-    return m;
-  })();
-
-  // ETF / broad-market sector heuristics (no API call needed)
-  const ETF_SECTOR_HINTS: Record<string, string> = {
-    SPY: "Broad Market", VOO: "Broad Market", VTI: "Broad Market", IVV: "Broad Market",
-    QQQ: "Tech", QQQM: "Tech", XLK: "Tech", VGT: "Tech", SMH: "Tech", SOXX: "Tech", SOXL: "Tech",
-    XLF: "Finance", VFH: "Finance",
-    XLV: "Healthcare", VHT: "Healthcare",
-    XLY: "Consumer", XLP: "Consumer", VCR: "Consumer", VDC: "Consumer",
-    XLE: "Energy", VDE: "Energy",
-    XLI: "Industrials", VIS: "Industrials",
-    XLU: "Utilities", VPU: "Utilities",
-    XLB: "Materials", VAW: "Materials",
-    XLRE: "Real Estate", VNQ: "Real Estate",
-    XLC: "Communications", VOX: "Communications",
-    DIA: "Broad Market", IWM: "Broad Market",
-    VXUS: "International", EFA: "International", EEM: "International",
-    BND: "Bonds", AGG: "Bonds", TLT: "Bonds", IEF: "Bonds", SHY: "Bonds",
-    GLD: "Commodities", SLV: "Commodities", USO: "Commodities", DBC: "Commodities",
-  };
-
-  // Yahoo Finance sector → our normalized sector buckets
-  function normalizeYahooSector(raw: string | null | undefined): string {
-    if (!raw) return "Other";
-    const s = raw.toLowerCase();
-    if (s.includes("technology")) return "Tech";
-    if (s.includes("financial")) return "Finance";
-    if (s.includes("health")) return "Healthcare";
-    if (s.includes("consumer")) return "Consumer";
-    if (s.includes("energy")) return "Energy";
-    if (s.includes("industrial")) return "Industrials";
-    if (s.includes("utilit")) return "Utilities";
-    if (s.includes("material") || s.includes("basic")) return "Materials";
-    if (s.includes("real estate")) return "Real Estate";
-    if (s.includes("communication")) return "Communications";
-    return raw;
-  }
-
-  // Cache symbol -> sector lookups (24h)
-  const sectorLookupCache = new Map<string, { sector: string; expiresAt: number }>();
-  const SECTOR_LOOKUP_TTL = 24 * 60 * 60 * 1000;
+  // 24h cache (per-process). On a cold miss for an off-curated symbol we
+  // ask Yahoo's quoteSummary; if that fails, we cache "Other" for 1h so we
+  // don't hammer the API on every page render.
+  const sectorLookupCache = makeCache<string>("sector-lookup", {
+    ttlMs: TTL.HOUR_24,
+    maxEntries: 5000,
+  });
 
   async function fetchSymbolSector(rawSym: string): Promise<string> {
     const sym = rawSym.toUpperCase().trim();
@@ -2548,41 +2327,33 @@ Do not invent genres not in the input.`;
 
     // 1. Curated map
     if (SYMBOL_TO_SECTOR_CURATED[sym]) return SYMBOL_TO_SECTOR_CURATED[sym];
-
     // 2. Known ETF / broad-market
     if (ETF_SECTOR_HINTS[sym]) return ETF_SECTOR_HINTS[sym];
+    // 3. Crypto sniff
+    if (isCryptoSymbol(sym)) return "Crypto";
 
-    // 3. Crypto sniff (BTC-USD, ETH-USD, etc.)
-    if (sym.endsWith("-USD") || /^(BTC|ETH|SOL|XRP|ADA|DOGE|AVAX|LINK|DOT|MATIC)$/.test(sym)) return "Crypto";
-
-    // 4. Cache
-    const cached = sectorLookupCache.get(sym);
-    if (cached && Date.now() < cached.expiresAt) return cached.sector;
-
-    // 5. Yahoo quoteSummary fallback
-    try {
-      const r = await fetch(
-        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=assetProfile,quoteType`,
-        { headers: { "User-Agent": "Mozilla/5.0" } }
-      );
-      if (!r.ok) throw new Error(`Yahoo ${r.status}`);
-      const data = await r.json();
-      const result = data?.quoteSummary?.result?.[0];
-      const quoteType: string | undefined = result?.quoteType?.quoteType;
-      const rawSector: string | undefined = result?.assetProfile?.sector;
-
-      let sector = "Other";
-      if (quoteType === "ETF" || quoteType === "MUTUALFUND") sector = "Broad Market";
-      else if (quoteType === "CRYPTOCURRENCY") sector = "Crypto";
-      else if (rawSector) sector = normalizeYahooSector(rawSector);
-
-      sectorLookupCache.set(sym, { sector, expiresAt: Date.now() + SECTOR_LOOKUP_TTL });
-      return sector;
-    } catch {
-      // Cache short so we retry later
-      sectorLookupCache.set(sym, { sector: "Other", expiresAt: Date.now() + 60 * 60 * 1000 });
-      return "Other";
-    }
+    // 4. Cache-aside with Yahoo fallback
+    return sectorLookupCache.getOrSet(sym, async () => {
+      try {
+        const r = await fetch(
+          `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=assetProfile,quoteType`,
+          { headers: { "User-Agent": "Mozilla/5.0" } }
+        );
+        if (!r.ok) throw new Error(`Yahoo ${r.status}`);
+        const data = await r.json();
+        const result = data?.quoteSummary?.result?.[0];
+        const quoteType: string | undefined = result?.quoteType?.quoteType;
+        const rawSector: string | undefined = result?.assetProfile?.sector;
+        if (quoteType === "ETF" || quoteType === "MUTUALFUND") return "Broad Market";
+        if (quoteType === "CRYPTOCURRENCY") return "Crypto";
+        if (rawSector) return normalizeYahooSector(rawSector);
+        return "Other";
+      } catch {
+        // Re-cache "Other" with a short TTL so we retry sooner than 24h.
+        sectorLookupCache.set(sym, "Other", { ttlMs: TTL.HOUR_1 });
+        return "Other";
+      }
+    });
   }
 
   app.post("/api/sector-lookup", async (req, res) => {
@@ -2600,12 +2371,6 @@ Do not invent genres not in the input.`;
       res.status(500).json({ message: e.message });
     }
   });
-
-  // Crypto symbols on Yahoo Finance are quoted as `<TICKER>-USD`
-  function yahooSymbol(sym: string, sector: string): string {
-    if (sector === "Crypto") return `${sym}-USD`;
-    return sym;
-  }
 
   app.post("/api/sector-leaders", async (req, res) => {
     const { weeks: rawWeeks } = req.body || {};
@@ -2652,34 +2417,20 @@ Do not invent genres not in the input.`;
     const weeks = Math.max(1, Math.min(52, parseInt(String(rawWeeks || 13), 10) || 13));
     if (!Array.isArray(holdings)) return res.status(400).json({ message: "holdings array required" });
 
-    // 1. Canonical sectors (same order as SECTOR_UNIVERSE → same as CategoryLeaders)
-    const canonical = Object.keys(SECTOR_UNIVERSE); // ["Tech","Finance","Healthcare","Consumer","Energy","Crypto"]
+    // 1. Resolve each holding to a canonical sector (or "Other"). This is the
+    //    one I/O step that depends on per-symbol Yahoo lookups (cached 24h).
+    const resolved = await Promise.all(
+      (holdings as { symbol: string; value: number }[]).map(async (h) => ({
+        symbol: String(h?.symbol || "").toUpperCase(),
+        value: Number(h?.value),
+        sector: await fetchSymbolSector(String(h?.symbol || "")),
+      }))
+    );
 
-    // 2. Bucket each holding's value into a canonical sector (or "Other")
-    const sectorValue: Record<string, number> = {};
-    const sectorSymbols: Record<string, string[]> = {};
-    let totalValue = 0;
-    let otherValue = 0;
-    const otherSymbols: string[] = [];
-
-    for (const h of holdings as { symbol: string; value: number }[]) {
-      if (!h?.symbol || !Number.isFinite(h.value) || h.value <= 0) continue;
-      const sym = String(h.symbol).toUpperCase();
-      const sector = await fetchSymbolSector(sym);
-      totalValue += h.value;
-      if (canonical.includes(sector)) {
-        sectorValue[sector] = (sectorValue[sector] ?? 0) + h.value;
-        (sectorSymbols[sector] = sectorSymbols[sector] ?? []).push(sym);
-      } else {
-        otherValue += h.value;
-        otherSymbols.push(sym);
-      }
-    }
-
-    // 3. Get each canonical sector's return over the lookback — use the
-    //    average return of the top-5 symbols in that sector (proxy for sector ETF).
+    // 2. Compute each canonical sector's return over the lookback. Average of
+    //    the top-5 symbols in the curated universe (proxy for the sector ETF).
     const sectorReturns = await Promise.all(
-      canonical.map(async (name) => {
+      CANONICAL_SECTORS.map(async (name) => {
         const top = SECTOR_UNIVERSE[name].slice(0, 5);
         const rs = await Promise.all(
           top.map((s) => fetchSentiment(yahooSymbol(s, name), weeks).catch(() => null))
@@ -2687,7 +2438,6 @@ Do not invent genres not in the input.`;
         const valid = rs.filter((x) => x && x.returnPct != null) as { returnPct: number | null }[];
         if (!valid.length) return { name, returnPct: null as number | null, leader: null as string | null };
         const avg = valid.reduce((s, x) => s + (x.returnPct ?? 0), 0) / valid.length;
-        // also find the leader (highest return) for actionable hint
         let leaderSym: string | null = null;
         let leaderRet = -Infinity;
         for (let i = 0; i < rs.length; i++) {
@@ -2701,64 +2451,9 @@ Do not invent genres not in the input.`;
       })
     );
 
-    // 4. Build current weights (canonical sectors only; cash/other reported separately)
-    const lanes = canonical.map((name) => {
-      const sr = sectorReturns.find((x) => x.name === name);
-      const value = sectorValue[name] ?? 0;
-      const currentWeight = totalValue > 0 ? value / totalValue : 0;
-      return {
-        sector: name,
-        currentWeight,
-        currentValue: value,
-        symbols: sectorSymbols[name] ?? [],
-        sectorReturnPct: sr?.returnPct ?? null,
-        leader: sr?.leader ?? null,
-      };
-    });
-
-    // 5. Optimal weights: performance-weighted across the canonical universe,
-    //    losers keep a baseline so the book stays diversified.
-    //    score = max(returnPct, 0) + 1   (flat = 1, +30% = 31, -10% = 1)
-    const scored = lanes.map((l) => {
-      const r = l.sectorReturnPct ?? 0;
-      return { ...l, score: Math.max(r, 0) + 1 };
-    });
-    const totalScore = scored.reduce((s, x) => s + x.score, 0) || 1;
-    const out = scored.map((l) => {
-      const optimalWeight = l.score / totalScore;
-      const delta = optimalWeight - l.currentWeight;
-      // poignant per-lane action chip
-      let actionChip: string | null = null;
-      if (l.currentWeight === 0 && (l.sectorReturnPct ?? 0) > 5) {
-        actionChip = `Add exposure — sector +${(l.sectorReturnPct ?? 0).toFixed(1)}%${l.leader ? `, leader ${l.leader}` : ""}`;
-      } else if (delta > 0.05) {
-        actionChip = `Underweight by ${(delta * 100).toFixed(1)}pt — sector ${(l.sectorReturnPct ?? 0) >= 0 ? "+" : ""}${(l.sectorReturnPct ?? 0).toFixed(1)}%`;
-      } else if (delta < -0.05) {
-        actionChip = `Overweight by ${(Math.abs(delta) * 100).toFixed(1)}pt — consider trim`;
-      } else if (l.currentWeight > 0) {
-        actionChip = `On target`;
-      }
-      return {
-        sector: l.sector,
-        currentWeight: l.currentWeight,
-        currentValue: l.currentValue,
-        optimalWeight,
-        deltaWeight: delta,
-        sectorReturnPct: l.sectorReturnPct,
-        leader: l.leader,
-        symbols: l.symbols,
-        action: actionChip,
-      };
-    });
-
-    res.json({
-      lanes: out,
-      otherWeight: totalValue > 0 ? otherValue / totalValue : 0,
-      otherValue,
-      otherSymbols,
-      totalValue,
-      weeks,
-    });
+    // 3. Pure math — bucket holdings, build current/optimal weights, action chips.
+    const allocation = computeOptimalAllocation(resolved, sectorReturns);
+    res.json({ ...allocation, weeks });
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -3054,18 +2749,30 @@ Do not invent genres not in the input.`;
     why: string;
     source: string;
     asOf: string;
+    // "high" — user-anchored or live-API candidate the client should surface
+    // "low"  — editorial fallback (no user data yet). The pill hides these by
+    //          default; pass ?showLowConfidence=1 to opt back in.
+    confidence: "high" | "low";
   };
+  const LOW_CONFIDENCE_SOURCES = new Set(["editorial"]);
 
   // cache key = `${userId}::${domain}`
-  const topPickCache = new Map<string, { ts: number; payload: TopPick | { domain: string; source: string; reason?: string } }>();
-  const TOP_PICK_TTL_MS = 12 * 60 * 60 * 1000;
+  const topPickCache = makeCache<TopPick | { domain: string; source: string; reason?: string }>(
+    "top-picks",
+    { ttlMs: TTL.HOUR_12, maxEntries: 5000 }
+  );
 
   async function claudeOneLiner(
     domain: string,
     candidate: { title: string; subtitle?: string; signal: string }
   ): Promise<string> {
+    // Default to the deterministic heuristic reason. Claude is opt-in via
+    // RADIUS_CLAUDE_COPY=1 — it sharpens the copy but adds latency, cost, and
+    // tonal drift across pills. Keeping it off by default makes the product
+    // sound like one designer wrote the strings, not an LLM filling in blanks.
+    if (process.env.RADIUS_CLAUDE_COPY !== "1") return candidate.signal;
     const key = process.env.ANTHROPIC_API_KEY;
-    if (!key) return candidate.signal; // graceful fallback — use the heuristic reason verbatim
+    if (!key) return candidate.signal;
 
     const system = `You write a single-sentence personal recommendation reason. Output PLAIN TEXT only — no quotes, no markdown, no preamble. Max 14 words. Warm, specific, second-person ("because you…"). Reference the user's signal, not generic claims.`;
     const userMsg = `Domain: ${domain}\nPick: ${candidate.title}${candidate.subtitle ? " — " + candidate.subtitle : ""}\nWhy heuristic picked it: ${candidate.signal}\n\nWrite the one-sentence reason.`;
@@ -3181,10 +2888,10 @@ Do not invent genres not in the input.`;
         // For place/event, swap in the user's selected city so demo mode is also referential.
         const demoCity = cityParam || "Honolulu";
         const demo: Record<string, TopPick> = {
-          stock: { domain, title: "NVDA", subtitle: "NVIDIA Corporation", why: "Your largest weighted position riding the AI buildout.", source: "demo", asOf: new Date().toISOString() },
-          artist: { domain, title: "Stick Figure", subtitle: "Reggae", why: "Heaviest in your rotation this month.", source: "demo", asOf: new Date().toISOString() },
-          movie: { domain, title: "Dune: Part Three", subtitle: "Sci-fi · 2026", why: "Tracks the slow-burn epics you've rated highly.", source: "demo", asOf: new Date().toISOString() },
-          show: { domain, title: "Severance", subtitle: "Apple TV+", why: "Matches your taste for cerebral thrillers.", source: "demo", asOf: new Date().toISOString() },
+          stock: { domain, title: "NVDA", subtitle: "NVIDIA Corporation", why: "Your largest weighted position riding the AI buildout.", source: "demo", asOf: new Date().toISOString(), confidence: "high" },
+          artist: { domain, title: "Stick Figure", subtitle: "Reggae", why: "Heaviest in your rotation this month.", source: "demo", asOf: new Date().toISOString(), confidence: "high" },
+          movie: { domain, title: "Dune: Part Three", subtitle: "Sci-fi · 2026", why: "Tracks the slow-burn epics you've rated highly.", source: "demo", asOf: new Date().toISOString(), confidence: "high" },
+          show: { domain, title: "Severance", subtitle: "Apple TV+", why: "Matches your taste for cerebral thrillers.", source: "demo", asOf: new Date().toISOString(), confidence: "high" },
           place: {
             domain,
             title: demoCity === "Honolulu" ? "Maku‘u Farmers Market" : `Iconic spot in ${demoCity}`,
@@ -3192,6 +2899,7 @@ Do not invent genres not in the input.`;
             why: `Top of your saved places near ${demoCity}.`,
             source: "demo",
             asOf: new Date().toISOString(),
+            confidence: "high",
           },
           event: {
             domain,
@@ -3200,6 +2908,7 @@ Do not invent genres not in the input.`;
             why: `Next upcoming event in ${demoCity} matched to your taste.`,
             source: "demo",
             asOf: new Date().toISOString(),
+            confidence: "high",
           },
         };
         return res.json(demo[domain]);
@@ -3209,9 +2918,9 @@ Do not invent genres not in the input.`;
       const cityScoped = domain === "place" || domain === "event";
       const cacheKey = `${userId}::${domain}${cityScoped && cityParam ? `::${cityParam.toLowerCase()}` : ""}`;
       if (!refresh) {
-        const hit = topPickCache.get(cacheKey);
-        if (hit && Date.now() - hit.ts < TOP_PICK_TTL_MS) {
-          return res.json(hit.payload);
+        const hit = topPickCache.peek(cacheKey);
+        if (hit) {
+          return res.json(hit);
         }
       }
 
@@ -3472,7 +3181,7 @@ Do not invent genres not in the input.`;
 
       if (!candidate) {
         const empty = { domain, source: "empty", reason: "no-candidate-data" };
-        topPickCache.set(cacheKey, { ts: Date.now(), payload: empty });
+        topPickCache.set(cacheKey, empty);
         return res.json(empty);
       }
 
@@ -3483,6 +3192,17 @@ Do not invent genres not in the input.`;
         signal: candidate.signal,
       });
 
+      const confidence: "high" | "low" = LOW_CONFIDENCE_SOURCES.has(candidate.source) ? "low" : "high";
+      const showLowConfidence = req.query.showLowConfidence === "1";
+      if (confidence === "low" && !showLowConfidence) {
+        // Honest default: don't fall back to canned copy. The pill renders
+        // nothing and the section below it still tells the user how to seed
+        // their data — we just stop pretending we have a pick.
+        const empty = { domain, source: "empty", reason: "low-confidence" };
+        topPickCache.set(cacheKey, empty);
+        return res.json(empty);
+      }
+
       const payload: TopPick = {
         domain,
         title: candidate.title,
@@ -3491,10 +3211,11 @@ Do not invent genres not in the input.`;
         url: candidate.url,
         why,
         source: candidate.source,
+        confidence,
         asOf: new Date().toISOString(),
       };
 
-      topPickCache.set(cacheKey, { ts: Date.now(), payload });
+      topPickCache.set(cacheKey, payload);
       res.json(payload);
     } catch (e: any) {
       console.error("top-picks error:", e?.message);
