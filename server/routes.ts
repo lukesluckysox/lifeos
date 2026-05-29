@@ -2588,7 +2588,7 @@ Rules: 5-6 sights, 4-5 neighborhoods, 3-4 day trips. Each note is 1 sentence, sp
         },
         body: JSON.stringify({
           model: "claude-haiku-4-5",
-          max_tokens: 1200,
+          max_tokens: 2048,
           system,
           messages: [{ role: "user", content: `Generate a travel guide for: ${city}` }],
         }),
@@ -2598,11 +2598,18 @@ Rules: 5-6 sights, 4-5 neighborhoods, 3-4 day trips. Each note is 1 sentence, sp
       const raw = (j.content?.[0]?.text || "").trim();
       // Strip any accidental code fences
       const cleaned = raw.replace(/^```[\w]*\n?|```$/g, "").trim();
-      const parsed: TravelGuide = JSON.parse(cleaned);
-      // Basic shape validation
-      if (!parsed.sights || !parsed.neighborhoods || !parsed.dayTrips) return null;
-      travelGuideCache.set(city.toLowerCase(), parsed);
-      return parsed;
+      const raw_parsed: any = JSON.parse(cleaned);
+      // Normalize snake_case or alternate key names the model might use
+      const normalized: TravelGuide = {
+        city: raw_parsed.city || city,
+        sights: raw_parsed.sights || raw_parsed.attractions || [],
+        neighborhoods: raw_parsed.neighborhoods || raw_parsed.districts || [],
+        dayTrips: raw_parsed.dayTrips || raw_parsed.day_trips || raw_parsed.excursions || [],
+      };
+      // Must have at least something useful
+      if (normalized.sights.length === 0 && normalized.neighborhoods.length === 0) return null;
+      travelGuideCache.set(city.toLowerCase(), normalized);
+      return normalized;
     } catch {
       return null;
     }
