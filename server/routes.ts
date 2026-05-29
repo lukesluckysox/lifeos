@@ -2566,7 +2566,7 @@ Do not invent genres not in the input.`;
     const key = process.env.ANTHROPIC_API_KEY;
     if (!key) return null;
 
-    const cached = travelGuideCache.get(city.toLowerCase());
+    const cached = travelGuideCache.peek(city.toLowerCase());
     if (cached) return cached;
 
     const system = `You are a knowledgeable travel editor. Return ONLY a valid JSON object — no markdown, no prose, no code fences. The schema is:
