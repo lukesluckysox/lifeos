@@ -209,20 +209,22 @@ function PlacesMain() {
                 className="rounded-lg border border-border bg-card p-5"
                 data-testid={`card-sight-${slugify(s.name)}`}
               >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Sparkles size={13} className={`${s.pinned ? "text-teal" : "text-gold"} shrink-0`} />
-                    <div className="font-display text-lg leading-tight truncate">{s.name}</div>
-                    {s.pinned && (
-                      <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-teal bg-teal/10 border border-teal/20 rounded px-1.5 py-0.5 shrink-0" data-testid={`badge-pinned-${slugify(s.name)}`}>pinned</span>
-                    )}
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-start gap-2 min-w-0 flex-1">
+                    <Sparkles size={13} className={`${s.pinned ? "text-teal" : "text-gold"} shrink-0 mt-[3px]`} />
+                    <div className="min-w-0">
+                      <div className="font-display text-lg leading-tight break-words">{s.name}</div>
+                      {s.pinned && (
+                        <span className="inline-block mt-1 text-[10px] font-mono uppercase tracking-[0.15em] text-teal bg-teal/10 border border-teal/20 rounded px-1.5 py-0.5" data-testid={`badge-pinned-${slugify(s.name)}`}>pinned</span>
+                      )}
+                    </div>
                   </div>
                   {s.url && (
                     <a
                       href={s.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      className="text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-[2px]"
                       data-testid={`link-sight-${slugify(s.name)}`}
                     >
                       <ExternalLink size={13} />
@@ -299,16 +301,18 @@ function PlacesMain() {
                 className="rounded-lg border border-border bg-card p-5"
                 data-testid={`card-daytrip-${slugify(t.name)}`}
               >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-2">
-                    <Route size={13} className="text-primary shrink-0" />
-                    <div className="font-display text-lg leading-tight">{t.name}</div>
+                <div className="flex items-start gap-2 mb-2">
+                  <Route size={13} className="text-primary shrink-0 mt-[3px]" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-display text-lg leading-tight break-words flex-1">{t.name}</div>
+                      {t.distance && (
+                        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground shrink-0 mt-[3px] whitespace-nowrap">
+                          {t.distance}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  {t.distance && (
-                    <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground tabular shrink-0">
-                      {t.distance}
-                    </span>
-                  )}
                 </div>
                 <p className="text-sm text-muted-foreground leading-relaxed">{t.note}</p>
                 <div className="mt-3">
@@ -364,7 +368,7 @@ function PlacesMain() {
                 </div>
                 <div className="flex items-center flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                   <span className="tabular">{formatDate(e.date)}</span>
-                  {e.venue && <span className="truncate max-w-[180px]">{e.venue}</span>}
+                  {e.venue && <span className="truncate max-w-[min(180px,50vw)]">{e.venue}</span>}
                   {e.category && (
                     <span className="rounded-full border border-border px-1.5 py-0.5 normal-case tracking-normal">
                       {e.category}

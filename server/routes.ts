@@ -2636,6 +2636,20 @@ Rules: 5-6 sights, 4-5 neighborhoods, 3-4 day trips. Each note is 1 sentence, sp
     }
   });
 
+  // Fire-and-forget prefetch — client calls this immediately on city-pick so
+  // the AI response is warm by the time the user opens Places.
+  app.post("/api/travel-guide/prefetch", async (req, res) => {
+    const city = ((req.body as any)?.city as string | undefined)?.trim();
+    if (!city) return res.status(400).json({ ok: false });
+    const key = city.toLowerCase();
+    if (CURATED_GUIDES[key] || travelGuideCache.peek(key)) {
+      return res.json({ ok: true, source: "cache" });
+    }
+    // Kick off AI fetch without awaiting — respond immediately
+    aiTravelGuide(city).catch(() => {});
+    return res.json({ ok: true, source: "warming" });
+  });
+
   app.get("/api/places-events", async (req, res) => {
     const city = (req.query.city as string | undefined)?.trim() || "Honolulu";
     if (!TM_KEY) return res.json({ source: "none", city, events: [] });

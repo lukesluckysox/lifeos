@@ -353,6 +353,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                             setCity(c);
                             setLocOpen(false);
                             queryClient.invalidateQueries();
+                            // Fire-and-forget: warm the travel-guide cache in the
+                            // background so Places loads fast when the user gets there.
+                            apiRequest("POST", "/api/travel-guide/prefetch", { city: c }).catch(() => {});
                           }}
                         />
                         <div className="mt-3 pt-3 border-t border-border/40 text-[10px] text-muted-foreground italic">
