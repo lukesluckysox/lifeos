@@ -2558,11 +2558,62 @@ Do not invent genres not in the input.`;
     };
   }
 
+  // AI-generated travel guide cache — keyed by lowercase city name.
+  // TTL 24h so re-deploys don't blow the budget; curated entries bypass this entirely.
+  const travelGuideCache = makeCache<TravelGuide>("travel-guide-ai", { ttlMs: TTL.HOUR_24, maxEntries: 200 });
+
+  async function aiTravelGuide(city: string): Promise<TravelGuide | null> {
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) return null;
+
+    const cached = travelGuideCache.get(city.toLowerCase());
+    if (cached) return cached;
+
+    const system = `You are a knowledgeable travel editor. Return ONLY a valid JSON object — no markdown, no prose, no code fences. The schema is:
+{
+  "city": string,
+  "sights": [{"name": string, "note": string, "url": string}],
+  "neighborhoods": [{"name": string, "note": string}],
+  "dayTrips": [{"name": string, "note": string, "distance": string}]
+}
+Rules: 5-6 sights, 4-5 neighborhoods, 3-4 day trips. Each note is 1 sentence, specific and evocative. URLs are real, well-known links (leave blank string if unsure). distance is driving time like "~45m" or "~2h".`;
+
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5",
+          max_tokens: 1200,
+          system,
+          messages: [{ role: "user", content: `Generate a travel guide for: ${city}` }],
+        }),
+      });
+      if (!r.ok) return null;
+      const j: any = await r.json();
+      const raw = (j.content?.[0]?.text || "").trim();
+      // Strip any accidental code fences
+      const cleaned = raw.replace(/^```[\w]*\n?|```$/g, "").trim();
+      const parsed: TravelGuide = JSON.parse(cleaned);
+      // Basic shape validation
+      if (!parsed.sights || !parsed.neighborhoods || !parsed.dayTrips) return null;
+      travelGuideCache.set(city.toLowerCase(), parsed);
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
   app.get("/api/travel-guide", optionalAuth, async (req, res) => {
     const city = (req.query.city as string | undefined)?.trim() || "Honolulu";
     const key = city.toLowerCase();
-    const guide = CURATED_GUIDES[key] || genericGuide(city);
     const curated = !!CURATED_GUIDES[key];
+    // Use curated guide if available, otherwise try AI, fall back to generic stubs
+    const guide = CURATED_GUIDES[key] || (await aiTravelGuide(city)) || genericGuide(city);
     const userId = req.user?.id;
 
     try {
