@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { useState } from "react";
-import { TrendingUp, TrendingDown, MapPin, Calendar as CalIcon, Music as MusicIcon, Tv, LineChart, ArrowUpRight, Check, X } from "lucide-react";
+import { TrendingUp, TrendingDown, MapPin, Calendar as CalIcon, Music as MusicIcon, Tv, LineChart, ArrowUpRight, Check, X, Sparkles, Compass } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TopPickPill, type TopPickDomain } from "@/components/TopPickPill";
 import { useMode } from "@/components/ModeProvider";
@@ -38,6 +38,10 @@ type Sight = { name: string; note: string; pinned?: boolean };
 type TravelGuide = { city: string; sights: Sight[]; curated: boolean };
 interface CatalogItem { id: string; kind: "show" | "film"; title: string; year: number; pinned?: boolean; }
 interface CatalogResp { source: string; items: CatalogItem[]; }
+interface InsightItem { kind: string; severity: "info" | "watch" | "alert"; title: string; detail: string; }
+interface InsightsResp { insights: InsightItem[]; totalValue: number; asOf: string; }
+interface Neighborhood { name: string; note: string; }
+interface TodayGuide { city: string; sights: Array<{ name: string; note: string; }>; neighborhoods: Neighborhood[]; }
 
 /* ---------- Page ---------- */
 
@@ -77,6 +81,15 @@ export default function Home() {
     queryKey: ["/api/catalog", "home"],
     queryFn: async () => (await apiRequest("GET", "/api/catalog")).json(),
   });
+  const { data: insights } = useQuery<InsightsResp>({
+    queryKey: ["/api/finance-insights", mode],
+    queryFn: async () => (await apiRequest("GET", withMode("/api/finance-insights"))).json(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: todayGuide } = useQuery<TodayGuide>({
+    queryKey: ["/api/travel-guide", city],
+    queryFn: async () => (await apiRequest("GET", withMode(`/api/travel-guide?city=${encodeURIComponent(city)}`))).json(),
+  });
 
   /* Finance numbers */
   const plaidValue = portfolio?.plaid?.totalValue ?? 0;
@@ -86,6 +99,16 @@ export default function Home() {
   const manualDayChange = (portfolio?.manual ?? []).reduce((a, m) => a + (m.value * (m.dayChangePct / 100) || 0), 0);
   const dayChange = plaidDayChange + manualDayChange;
   const dayChangePct = netWorth > 0 ? (dayChange / (netWorth - dayChange)) * 100 : 0;
+
+  /* Finance narrative */
+  const topInsight = (insights?.insights ?? [])[0];
+  const bigMover = (insights?.insights ?? []).find(i => i.kind === "mover");
+  const concentration = (insights?.insights ?? []).find(i => i.kind === "concentration");
+
+  /* Today in city */
+  const todaySight = (todayGuide?.sights ?? []).filter(s => !s.pinned)[0];
+  const todayNeighborhood = (todayGuide?.neighborhoods ?? [])[0];
+  const upcomingEvent = (concertsResp?.concerts ?? [])[0];
 
   /* Places: top 3 sights */
   const topSights = (guide?.sights ?? []).slice(0, 3);
@@ -135,6 +158,26 @@ export default function Home() {
         showCount={showCount}
         city={city}
       />
+
+      {/* ---- Finance narrative strip ---- */}
+      {netWorth > 0 && (
+        <FinanceNarrative
+          dayChange={dayChange}
+          dayChangePct={dayChangePct}
+          bigMover={bigMover}
+          concentration={concentration}
+        />
+      )}
+
+      {/* ---- Today in the city ---- */}
+      {(todaySight || todayNeighborhood || upcomingEvent) && (
+        <TodayInCity
+          city={city}
+          sight={todaySight}
+          neighborhood={todayNeighborhood}
+          event={upcomingEvent}
+        />
+      )}
 
       <div className="hairline" />
 
@@ -557,4 +600,119 @@ function formatDate(iso?: string) {
   } catch {
     return iso || "TBA";
   }
+}
+
+/* ---------- Finance Narrative strip ---------- */
+function FinanceNarrative({
+  dayChange, dayChangePct, bigMover, concentration,
+}: {
+  dayChange: number;
+  dayChangePct: number;
+  bigMover?: { title: string; detail: string } | undefined;
+  concentration?: { title: string; detail: string } | undefined;
+}) {
+  const positive = dayChange >= 0;
+  const hasChange = Math.abs(dayChange) > 0.5;
+
+  // Build a 1-2 sentence plain-English read.
+  const parts: string[] = [];
+  if (hasChange) {
+    parts.push(
+      `Portfolio ${positive ? "up" : "down"} $${Math.abs(dayChange).toLocaleString(undefined, { maximumFractionDigits: 0 })} (${positive ? "+" : ""}${dayChangePct.toFixed(2)}%) today.`
+    );
+  }
+  if (bigMover) {
+    // Strip the ticker prefix — already in the title, keep it short
+    parts.push(bigMover.title + ".");
+  } else if (concentration) {
+    parts.push(concentration.title + ".");
+  }
+  if (parts.length === 0) return null;
+
+  return (
+    <div
+      className="flex items-start gap-3 rounded-xl border border-border bg-card/40 px-5 py-4"
+      data-testid="section-finance-narrative"
+    >
+      <LineChart size={14} className={`mt-[3px] shrink-0 ${positive ? "text-teal" : "text-rose"}`} />
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        {parts.map((p, i) => (
+          <span key={i}>{i > 0 && " "}{p}</span>
+        ))}
+        {" "}
+        <Link href="/finance">
+          <span className="text-teal hover:underline underline-offset-2 cursor-pointer font-mono text-xs uppercase tracking-wider">
+            Full view →
+          </span>
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+/* ---------- Today in the city ---------- */
+function TodayInCity({
+  city, sight, neighborhood, event,
+}: {
+  city: string;
+  sight?: { name: string; note: string };
+  neighborhood?: { name: string; note: string };
+  event?: { artist: string; venue: string; date: string; url?: string };
+}) {
+  return (
+    <section data-testid="section-today-in-city">
+      <div className="flex items-center gap-2 mb-3">
+        <Compass size={13} className="text-teal" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          Today in {city}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {sight && (
+          <Link href="/places">
+            <div
+              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-teal/30 transition-colors p-4 cursor-pointer"
+              data-testid="today-card-sight"
+            >
+              <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70 mb-2 flex items-center gap-1">
+                <MapPin size={9} /> Top sight
+              </div>
+              <div className="font-display text-base leading-tight mb-1">{sight.name}</div>
+              <div className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{sight.note}</div>
+            </div>
+          </Link>
+        )}
+        {neighborhood && (
+          <Link href="/places">
+            <div
+              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-teal/30 transition-colors p-4 cursor-pointer"
+              data-testid="today-card-neighborhood"
+            >
+              <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70 mb-2 flex items-center gap-1">
+                <Compass size={9} /> Neighborhood
+              </div>
+              <div className="font-display text-base leading-tight mb-1">{neighborhood.name}</div>
+              <div className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{neighborhood.note}</div>
+            </div>
+          </Link>
+        )}
+        {event && (
+          <Link href="/events">
+            <div
+              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-teal/30 transition-colors p-4 cursor-pointer"
+              data-testid="today-card-event"
+            >
+              <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70 mb-2 flex items-center gap-1">
+                <CalIcon size={9} /> Up next
+              </div>
+              <div className="font-display text-base leading-tight mb-1">{event.artist}</div>
+              <div className="text-xs text-muted-foreground leading-relaxed">
+                {event.venue} · {formatDate(event.date)}
+              </div>
+            </div>
+          </Link>
+        )}
+      </div>
+    </section>
+  );
 }

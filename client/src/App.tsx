@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { AccentProvider } from "@/components/AccentProvider";
 import { ModeProvider } from "@/components/ModeProvider";
 import { QuietModeProvider } from "@/components/QuietModeProvider";
 import { LocationProvider } from "@/components/LocationProvider";
@@ -124,6 +125,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ThemeProvider>
+          <AccentProvider>
           <ModeProvider>
             <QuietModeProvider>
               <LocationProvider>
@@ -136,6 +138,7 @@ function App() {
               </LocationProvider>
             </QuietModeProvider>
           </ModeProvider>
+          </AccentProvider>
         </ThemeProvider>
       </AuthProvider>
     </QueryClientProvider>

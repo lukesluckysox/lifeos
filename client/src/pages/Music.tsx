@@ -81,6 +81,127 @@ function formatRelease(iso?: string) {
   }
 }
 
+
+/* ─────────────────────────────────────────────────────────────────────── */
+/* Listening Identity — hero card                                          */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+function ListeningIdentity({ data, isLoading }: { data?: MoodResp; isLoading: boolean }) {
+  if (isLoading && !data) {
+    return (
+      <div className="rounded-2xl border border-border bg-card/40 p-8 animate-pulse" data-testid="identity-skeleton">
+        <div className="h-3 w-24 bg-secondary/50 rounded mb-6" />
+        <div className="h-10 w-56 bg-secondary/50 rounded mb-6" />
+        <div className="flex gap-4 mb-6">
+          <div className="flex-1 h-1.5 bg-secondary/50 rounded-full" />
+          <div className="flex-1 h-1.5 bg-secondary/50 rounded-full" />
+        </div>
+        <div className="flex gap-2">
+          {[1,2,3].map(i => <div key={i} className="h-6 w-16 bg-secondary/50 rounded-full" />)}
+        </div>
+      </div>
+    );
+  }
+
+  if (!data || data.source === "unauthorized" || data.source === "no-data" || typeof data.score !== "number") {
+    return (
+      <div className="rounded-2xl border border-border bg-card/40 px-6 py-5 text-xs text-muted-foreground flex items-center gap-2" data-testid="identity-empty">
+        <Sparkles size={12} className="text-muted-foreground/50" />
+        {data?.reason === "no-listening-history"
+          ? "Play some tracks on Spotify, then refresh — we'll read your sound."
+          : "Connect Spotify to see your listening identity."}
+      </div>
+    );
+  }
+
+  const valence = data.valence ?? 50;
+  const energy = data.energy ?? 50;
+  const delta = data.delta ?? 0;
+  const DeltaIcon = delta > 1 ? TrendingUp : delta < -1 ? TrendingDown : Minus;
+  const deltaSign = delta > 0 ? "+" : "";
+  const deltaTone = delta > 1 ? "text-teal" : delta < -1 ? "text-destructive" : "text-muted-foreground";
+
+  return (
+    <div
+      className="relative rounded-2xl border border-border bg-card overflow-hidden"
+      data-testid="identity-hero"
+    >
+      {/* Subtle gradient backdrop that shifts with valence + energy */}
+      <div
+        className="absolute inset-0 opacity-[0.035] pointer-events-none"
+        style={{
+          background: `radial-gradient(ellipse at 25% 60%, hsl(${184 + (valence - 50) * 0.5} 42% 56%), transparent 65%),
+                       radial-gradient(ellipse at 75% 40%, hsl(${258 - (energy - 50) * 0.7} 36% 52%), transparent 65%)`,
+        }}
+      />
+
+      <div className="relative p-7 sm:p-8">
+        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground/60 mb-4">
+          Your sound right now
+        </div>
+
+        {/* Big label + delta */}
+        <div className="flex items-baseline gap-4 flex-wrap mb-7">
+          <span
+            className="font-display text-[clamp(2rem,5vw,3.25rem)] leading-none tracking-tight"
+            data-testid="identity-label"
+          >
+            {data.label || "Mixed"}
+          </span>
+          <span
+            className={`inline-flex items-center gap-1 font-mono text-sm tabular ${deltaTone}`}
+            data-testid="identity-delta"
+          >
+            <DeltaIcon size={13} />{deltaSign}{delta}
+          </span>
+        </div>
+
+        {/* Valence + Energy — thin bars, no numbers cluttering the hero */}
+        <div className="grid grid-cols-2 gap-x-8 gap-y-3 mb-7 max-w-xs">
+          {([
+            { label: "Valence", value: valence },
+            { label: "Energy",  value: energy  },
+          ] as const).map(({ label, value }) => (
+            <div key={label}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60">{label}</span>
+                <span className="font-mono text-[10px] tabular text-muted-foreground/70">{value}</span>
+              </div>
+              <div className="h-[3px] w-full rounded-full bg-secondary/50 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-foreground/50 transition-all duration-700"
+                  style={{ width: `${value}%` }}
+                  data-testid={`bar-${label.toLowerCase()}`}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Driver genre pills */}
+        {data.drivers && data.drivers.length > 0 && (
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/50 mr-1">Driven by</span>
+            {data.drivers.map((g) => (
+              <span
+                key={g}
+                className="inline-flex items-center rounded-full border border-border bg-secondary/30 px-3 py-1 text-xs text-foreground/80"
+                data-testid={`chip-genre-${g.toLowerCase().replace(/\s+/g, "-")}`}
+              >
+                {g}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {(data.source === "heuristic" || data.source === "heuristic-fallback") && (
+          <div className="mt-4 text-[10px] font-mono text-muted-foreground/40">fallback reading — AI scorer offline</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────── */
 /* Mood Ticker — stock-ticker style strip                                  */
 /* ─────────────────────────────────────────────────────────────────────── */
@@ -495,9 +616,9 @@ export default function Music() {
 
       {isAnyUnauthorized && <UnauthorizedHint />}
 
-      {/* Mood Ticker — full width, top of page */}
+      {/* Listening identity hero — replaces the old mood ticker at top */}
       <section data-testid="section-mood">
-        <MoodTicker data={mood.data} isLoading={mood.isLoading} />
+        <ListeningIdentity data={mood.data} isLoading={mood.isLoading} />
       </section>
 
       {/* New releases — full width row, more breathing room than before */}

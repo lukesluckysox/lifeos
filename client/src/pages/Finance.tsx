@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopPickPill } from "@/components/TopPickPill";
 import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, ArrowUpRight, Building2 } from "lucide-react";
@@ -140,6 +140,43 @@ function signedFixed(n: number | null | undefined, digits: number = 2): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return `${n >= 0 ? "+" : ""}${n.toFixed(digits)}%`;
 }
+
+/* ---- 7-day sparkline for each holding ---- */
+function HoldingSparkline({ points, positive }: { points: { t: number; p: number }[]; positive: boolean }) {
+  if (!points || points.length < 2) return <div className="w-16 h-6" />;
+  const w = 64, h = 24;
+  const vals = points.map(p => p.p);
+  const minV = Math.min(...vals);
+  const maxV = Math.max(...vals);
+  const range = Math.max(maxV - minV, 0.01);
+  const xStep = w / (points.length - 1);
+  const coords = points.map((p, i) => ({
+    x: i * xStep,
+    y: h - (h - 2) * ((p.p - minV) / range) - 1,
+  }));
+  const line = coords.map((c, i) => (i === 0 ? `M${c.x},${c.y}` : `L${c.x},${c.y}`)).join(" ");
+  const color = positive ? "hsl(184 42% 52%)" : "hsl(350 46% 58%)";
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-16 h-6 shrink-0" preserveAspectRatio="none">
+      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function useHoldingCharts(symbols: string[], mode: string) {
+  return useQuery<Record<string, { t: number; p: number }[]>>({
+    queryKey: ["/api/chart-history/batch", symbols.join(","), mode],
+    queryFn: async () => {
+      if (!symbols.length) return {};
+      const resp = await apiRequest("POST", "/api/chart-history/batch", { symbols, range: "1mo" });
+      const data: Record<string, { t: number; p: number }[]> = await resp.json();
+      return data;
+    },
+    enabled: symbols.length > 0 && mode !== "demo",
+    staleTime: 15 * 60 * 1000,
+  });
+}
+
 function safePct(n: number | null | undefined): number {
   return n != null && Number.isFinite(n) ? n : 0;
 }
@@ -157,6 +194,10 @@ function FinancePortfolio() {
 
   const topConcentration = allocRows[0];
   const biggestMover = [...allocRows].sort((a, b) => Math.abs(safePct(b.dayChangePct)) - Math.abs(safePct(a.dayChangePct)))[0];
+
+  /* 7-day sparklines for each holding */
+  const holdingSymbols = useMemo(() => allocRows.map(r => r.symbol), [allocRows]);
+  const { data: chartData } = useHoldingCharts(holdingSymbols, mode);
 
   /* Index comparison */
   const [indexSym, setIndexSym] = useState("SPY");
@@ -295,6 +336,13 @@ function FinancePortfolio() {
                     <div className="font-mono text-foreground font-medium w-16">{r.symbol}</div>
                     <div className="flex-1 min-w-0 text-xs text-muted-foreground truncate">{r.name}</div>
                     <div className="font-mono tabular text-muted-foreground w-14 text-right">{fixed(r.weight, 1)}%</div>
+                    {/* 7-day sparkline */}
+                    <div className="hidden md:flex items-center">
+                      <HoldingSparkline
+                        points={chartData?.[r.symbol] ?? []}
+                        positive={safePct(r.dayChangePct) >= 0}
+                      />
+                    </div>
                     <div className="hidden sm:flex flex-col items-end w-20">
                       <div className={`font-mono tabular text-[11px] ${safePct(r.dayChangePct) >= 0 ? "text-teal" : "text-rose"}`}>
                         {signedFixed(r.dayChangePct)}

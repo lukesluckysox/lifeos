@@ -5,6 +5,7 @@ import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/components/AuthProvider";
 import { useTheme } from "@/components/ThemeProvider";
+import { useAccent, type Accent } from "@/components/AccentProvider";
 
 interface PlaidItem {
   id: number;
@@ -16,6 +17,7 @@ interface PlaidItem {
 export default function Settings() {
   const { user, logout, loginWithSpotify } = useAuth();
   const { theme, toggle } = useTheme();
+  const { accent, setAccent } = useAccent();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -102,6 +104,10 @@ export default function Settings() {
               {theme === "dark" ? "Dark" : "Light"}
             </button>
           }
+        />
+        <Row
+          label="Accent"
+          value={<AccentPicker accent={accent} setAccent={setAccent} />}
         />
       </Section>
 
@@ -312,6 +318,37 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="flex items-center justify-between gap-4 py-2.5 border-b border-border/40 last:border-b-0">
       <span className="text-xs text-muted-foreground font-mono uppercase tracking-wider">{label}</span>
       <span className="text-sm">{value}</span>
+    </div>
+  );
+}
+
+const ACCENTS: { id: Accent; label: string; hsl: string }[] = [
+  { id: "teal",   label: "Teal",   hsl: "hsl(184 42% 52%)" },
+  { id: "gold",   label: "Gold",   hsl: "hsl(38 62% 52%)"  },
+  { id: "violet", label: "Violet", hsl: "hsl(258 52% 60%)" },
+  { id: "rose",   label: "Rose",   hsl: "hsl(350 46% 58%)" },
+  { id: "slate",  label: "Slate",  hsl: "hsl(220 14% 60%)" },
+];
+
+function AccentPicker({ accent, setAccent }: { accent: Accent; setAccent: (a: Accent) => void }) {
+  return (
+    <div className="flex items-center gap-1.5" data-testid="accent-picker">
+      {ACCENTS.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          title={a.label}
+          data-testid={`accent-swatch-${a.id}`}
+          onClick={() => setAccent(a.id)}
+          style={{ background: a.hsl }}
+          className={`w-5 h-5 rounded-full transition-all ${
+            accent === a.id
+              ? "ring-2 ring-offset-2 ring-offset-card scale-110"
+              : "opacity-60 hover:opacity-90 hover:scale-105"
+          }`}
+          aria-label={a.label}
+        />
+      ))}
     </div>
   );
 }
