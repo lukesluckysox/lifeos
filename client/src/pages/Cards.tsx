@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { CreditCard, Plus, Trash2, ChevronDown, ChevronUp, DollarSign, Plane, Utensils, ShoppingBag, Building2, Shield, Star, AlertTriangle } from "lucide-react";
+import { CreditCard, Trash2, ChevronDown, ChevronUp, DollarSign, Plane, Utensils, ShoppingBag, Building2, Shield, Star, AlertTriangle, Search, X } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/components/AuthProvider";
 
@@ -36,6 +36,95 @@ const CATEGORY_COLOR: Record<string, string> = {
   rewards:   "text-blue border-blue/30 bg-blue/10",
 };
 
+/* ── Card Search Bar ──────────────────────────────────────────────── */
+function CardSearch({
+  catalog,
+  alreadyAdded,
+  onAdd,
+  adding,
+  onClose,
+}: {
+  catalog: CardCatalogItem[];
+  alreadyAdded: Set<string>;
+  onAdd: (id: string) => void;
+  adding: boolean;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+
+  const results = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return catalog.filter(c => !alreadyAdded.has(c.id)).slice(0, 8);
+    return catalog
+      .filter(c => !alreadyAdded.has(c.id))
+      .filter(c =>
+        c.name.toLowerCase().includes(term) ||
+        c.issuer.toLowerCase().includes(term) ||
+        c.network.toLowerCase().includes(term)
+      )
+      .slice(0, 12);
+  }, [q, catalog, alreadyAdded]);
+
+  return (
+    <div className="dash-card overflow-hidden" data-testid="panel-add-card">
+      <div className="dash-card-header flex items-center gap-3 px-4 py-3">
+        <Search size={14} className="text-muted-foreground shrink-0" />
+        <input
+          autoFocus
+          type="text"
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          placeholder="Search cards — Chase Sapphire, Amex Platinum, Venture X…"
+          className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/50"
+          data-testid="input-card-search"
+        />
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
+          <X size={14} />
+        </button>
+      </div>
+
+      {results.length === 0 ? (
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+          {q.trim() ? `No cards matching "${q.trim()}"` : "All available cards already added."}
+        </div>
+      ) : (
+        <div className="divide-y divide-border/40 max-h-80 overflow-y-auto">
+          {results.map(card => (
+            <button
+              key={card.id}
+              onClick={() => onAdd(card.id)}
+              disabled={adding}
+              className="w-full flex items-center gap-3 text-left px-4 py-3 hover:bg-accent/40 transition-colors disabled:opacity-40"
+              data-testid={`add-card-${card.id}`}
+            >
+              {/* Card color swatch */}
+              <div className={`w-9 h-6 rounded-md bg-gradient-to-r ${card.color} shrink-0`} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{card.issuer}</div>
+                <div className="text-sm font-semibold truncate">{card.name}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-xs font-mono text-muted-foreground">
+                  {card.annualFee === 0 ? "No fee" : `$${card.annualFee}/yr`}
+                </div>
+                <div className="text-[10px] text-muted-foreground/60">{card.benefitCount} benefits</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!q.trim() && results.length > 0 && (
+        <div className="px-4 py-2.5 border-t border-border/40">
+          <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60">
+            {catalog.filter(c => !alreadyAdded.has(c.id)).length} cards available · type to search
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Page ────────────────────────────────────────────────────────────── */
 export default function Cards() {
   const { user } = useAuth();
@@ -58,7 +147,10 @@ export default function Cards() {
     mutationFn: async (cardId: string) => {
       await apiRequest("POST", "/api/cards", { cardId });
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/cards"] }); setShowAdd(false); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
+      setShowAdd(false);
+    },
   });
 
   const removeMutation = useMutation({
@@ -71,7 +163,6 @@ export default function Cards() {
   const totalValue = userCards.reduce((s, c) => s + (c.definition?.estimatedAnnualValue ?? 0), 0);
   const netValue = totalValue - totalFees;
 
-  // Benefits by category across all cards
   const allBenefits = userCards.flatMap(c =>
     (c.definition?.benefits ?? []).map(b => ({ ...b, cardName: c.definition?.name ?? "", cardIssuer: c.definition?.issuer ?? "" }))
   );
@@ -80,7 +171,6 @@ export default function Cards() {
     return acc;
   }, {});
 
-  // Overlap detection — benefits with same category across multiple cards
   const overlaps = Object.entries(byCategory)
     .filter(([, benefits]) => benefits.length > 1)
     .map(([cat, benefits]) => ({ category: cat, benefits, totalValue: benefits.reduce((s, b) => s + b.annualValue, 0) }));
@@ -101,38 +191,20 @@ export default function Cards() {
           className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:border-blue/30 hover:text-blue transition-colors"
           data-testid="button-add-card"
         >
-          <Plus size={14} /> Add card
+          {showAdd ? <X size={14} /> : <Search size={14} />}
+          {showAdd ? "Close" : "Add card"}
         </button>
       </div>
 
-      {/* Add card panel */}
+      {/* Search bar — replaces the old grid catalog */}
       {showAdd && (
-        <div className="rounded-xl border border-border bg-card p-5" data-testid="panel-add-card">
-          <div className="text-sm font-semibold mb-4">Choose a card</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-96 overflow-y-auto pr-1">
-            {catalog.filter(c => !alreadyAdded.has(c.id)).map(card => (
-              <button
-                key={card.id}
-                onClick={() => addMutation.mutate(card.id)}
-                disabled={addMutation.isPending}
-                className="flex items-start gap-3 text-left rounded-lg border border-border bg-card/60 hover:bg-card hover:border-blue/30 transition-colors p-3"
-                data-testid={`add-card-${card.id}`}
-              >
-                <div className={`w-8 h-5 rounded bg-gradient-to-r ${card.color} shrink-0 mt-0.5`} />
-                <div className="min-w-0">
-                  <div className="text-xs font-medium truncate">{card.issuer}</div>
-                  <div className="text-sm font-semibold truncate">{card.name}</div>
-                  <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                    {card.annualFee === 0 ? "No fee" : `$${card.annualFee}/yr`} · {card.benefitCount} benefits
-                  </div>
-                </div>
-              </button>
-            ))}
-            {catalog.filter(c => !alreadyAdded.has(c.id)).length === 0 && (
-              <p className="text-sm text-muted-foreground col-span-full py-4">All available cards added.</p>
-            )}
-          </div>
-        </div>
+        <CardSearch
+          catalog={catalog}
+          alreadyAdded={alreadyAdded}
+          onAdd={(id) => addMutation.mutate(id)}
+          adding={addMutation.isPending}
+          onClose={() => setShowAdd(false)}
+        />
       )}
 
       {/* Summary stats */}
@@ -179,7 +251,13 @@ export default function Cards() {
             <div className="rounded-xl border border-dashed border-border p-10 text-center">
               <CreditCard size={32} className="mx-auto text-muted-foreground/30 mb-3" />
               <div className="text-sm font-medium mb-1">No cards added yet</div>
-              <div className="text-xs text-muted-foreground">Add your cards to see a unified view of your benefits.</div>
+              <div className="text-xs text-muted-foreground mb-4">Search for your cards to see a unified view of your benefits.</div>
+              <button
+                onClick={() => setShowAdd(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-blue/30 bg-blue/10 text-blue px-4 py-2 text-sm font-medium hover:bg-blue/20 transition-colors"
+              >
+                <Search size={14} /> Search cards
+              </button>
             </div>
           )}
           {userCards.map(uc => {
@@ -240,7 +318,7 @@ export default function Cards() {
         </div>
       )}
 
-      {/* Benefits tab — all benefits across all cards by category */}
+      {/* Benefits tab */}
       {activeTab === "benefits" && userCards.length > 0 && (
         <div className="space-y-6">
           {Object.entries(byCategory).sort(([a], [b]) => a.localeCompare(b)).map(([category, benefits]) => (

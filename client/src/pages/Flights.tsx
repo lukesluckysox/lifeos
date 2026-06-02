@@ -1,8 +1,9 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plane, Plus, Trash2, MapPin, Calendar, TrendingUp } from "lucide-react";
+import { Plane, Plus, Trash2, MapPin, TrendingUp, ScanLine } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/components/AuthProvider";
+import { BoardingPassScanner, type ParsedBoardingPass } from "@/components/BoardingPassScanner";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 interface FlightLeg {
@@ -15,7 +16,6 @@ interface FlightLeg {
 const CABINS = ["Economy", "Premium Economy", "Business", "First"];
 
 /* ── Great-circle distance (Haversine) ──────────────────────────────── */
-// Airport coordinates for distance estimation
 const AIRPORT_COORDS: Record<string, [number, number]> = {
   HNL:[21.3245,-157.9251],LAX:[33.9425,-118.4081],SFO:[37.6213,-122.379],
   JFK:[40.6413,-73.7781],LGA:[40.7772,-73.8726],EWR:[40.6895,-74.1745],
@@ -51,9 +51,8 @@ function estimateMiles(origin: string, dest: string): number {
   return Math.round(haversineKm(c1, c2) * 0.621371);
 }
 
-/* ── Arc Map (SVG world map with flight arcs) ──────────────────────── */
+/* ── Arc Map ─────────────────────────────────────────────────────── */
 function ArcMap({ legs }: { legs: FlightLeg[] }) {
-  // Simplified plate-carrée projection: x = (lon+180)/360 * W, y = (90-lat)/180 * H
   const W = 800, H = 380;
   const project = (lat: number, lon: number): [number, number] => [
     ((lon + 180) / 360) * W,
@@ -76,19 +75,15 @@ function ArcMap({ legs }: { legs: FlightLeg[] }) {
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden" data-testid="flight-arc-map">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 320 }}>
-        {/* Simple world outline — just a background rect with grid lines */}
         <rect width={W} height={H} fill="hsl(var(--card))" />
-        {/* Longitude lines */}
         {Array.from({ length: 13 }, (_, i) => i * 30).map(lon => {
-          const x = ((lon) / 360) * W;
+          const x = (lon / 360) * W;
           return <line key={lon} x1={x} y1={0} x2={x} y2={H} stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4" />;
         })}
-        {/* Latitude lines */}
         {[-60, -30, 0, 30, 60].map(lat => {
           const y = ((90 - lat) / 180) * H;
           return <line key={lat} x1={0} y1={y} x2={W} y2={y} stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4" />;
         })}
-        {/* Flight arcs */}
         {arcs.map(a => (
           <path
             key={a.id}
@@ -100,7 +95,6 @@ function ArcMap({ legs }: { legs: FlightLeg[] }) {
             opacity="0.7"
           />
         ))}
-        {/* Airport dots */}
         {Array.from(dots).map(iata => {
           const c = AIRPORT_COORDS[iata];
           if (!c) return null;
@@ -117,11 +111,15 @@ function ArcMap({ legs }: { legs: FlightLeg[] }) {
   );
 }
 
+/* ── Blank form state ─────────────────────────────────────────────── */
+const BLANK_FORM = { origin: "", destination: "", departureDate: "", airline: "", flightNumber: "", cabin: "Economy", notes: "" };
+
 /* ── Page ─────────────────────────────────────────────────────────── */
 export default function Flights() {
   const { user } = useAuth();
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ origin: "", destination: "", departureDate: "", airline: "", flightNumber: "", cabin: "Economy", notes: "" });
+  const [showScanner, setShowScanner] = useState(false);
+  const [form, setForm] = useState(BLANK_FORM);
 
   const { data: legs = [], isLoading } = useQuery<FlightLeg[]>({
     queryKey: ["/api/flights"],
@@ -137,7 +135,7 @@ export default function Flights() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/flights"] });
       setShowAdd(false);
-      setForm({ origin: "", destination: "", departureDate: "", airline: "", flightNumber: "", cabin: "Economy", notes: "" });
+      setForm(BLANK_FORM);
     },
   });
 
@@ -145,6 +143,21 @@ export default function Flights() {
     mutationFn: async (id: number) => apiRequest("DELETE", `/api/flights/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/flights"] }),
   });
+
+  /* Handle boarding pass scan result — pre-fill form and open it */
+  function handleScanned(pass: ParsedBoardingPass) {
+    setShowScanner(false);
+    setForm({
+      origin: pass.origin,
+      destination: pass.destination,
+      departureDate: pass.departureDate,
+      airline: pass.airline,
+      flightNumber: pass.flightNumber,
+      cabin: pass.cabin,
+      notes: "",
+    });
+    setShowAdd(true);
+  }
 
   /* Stats */
   const totalMiles = legs.reduce((s, l) => s + (l.miles || estimateMiles(l.origin, l.destination)), 0);
@@ -169,20 +182,45 @@ export default function Flights() {
           <h1 className="font-display text-3xl">Flights</h1>
           <p className="mt-1 text-sm text-muted-foreground">Your flight history, miles logged, and routes mapped.</p>
         </div>
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:border-blue/30 hover:text-blue transition-colors"
-          data-testid="button-log-flight"
-        >
-          <Plus size={14} /> Log flight
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Scan boarding pass */}
+          <button
+            onClick={() => { setShowScanner(!showScanner); setShowAdd(false); }}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:border-blue/30 hover:text-blue transition-colors"
+            data-testid="button-scan-boarding-pass"
+          >
+            <ScanLine size={14} /> Scan pass
+          </button>
+          {/* Manual log */}
+          <button
+            onClick={() => { setShowAdd(!showAdd); setShowScanner(false); }}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:border-blue/30 hover:text-blue transition-colors"
+            data-testid="button-log-flight"
+          >
+            <Plus size={14} /> Log flight
+          </button>
+        </div>
       </div>
+
+      {/* Boarding pass scanner */}
+      {showScanner && (
+        <BoardingPassScanner
+          onParsed={handleScanned}
+          onClose={() => setShowScanner(false)}
+        />
+      )}
 
       {/* Add flight form */}
       {showAdd && (
         <div className="dash-card overflow-hidden" data-testid="form-add-flight">
-          <div className="dash-card-header px-5 py-3">
+          <div className="dash-card-header px-5 py-3 flex items-center justify-between">
             <span className="text-sm font-semibold">Log a flight</span>
+            {/* Subtle "scanned" indicator when form was pre-filled */}
+            {form.origin && form.destination && (
+              <span className="text-[10px] font-mono uppercase tracking-wider text-blue border border-blue/30 rounded px-2 py-0.5">
+                {form.airline ? "Scanned" : "Manual"}
+              </span>
+            )}
           </div>
           <div className="px-5 py-4 space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -249,7 +287,7 @@ export default function Flights() {
               >
                 {addMutation.isPending ? "Saving..." : "Save flight"}
               </button>
-              <button onClick={() => setShowAdd(false)} className="text-sm text-muted-foreground hover:text-foreground">Cancel</button>
+              <button onClick={() => { setShowAdd(false); setForm(BLANK_FORM); }} className="text-sm text-muted-foreground hover:text-foreground">Cancel</button>
             </div>
           </div>
         </div>
@@ -306,7 +344,13 @@ export default function Flights() {
           <div className="rounded-xl border border-dashed border-border p-10 text-center">
             <Plane size={32} className="mx-auto text-muted-foreground/30 mb-3" />
             <div className="text-sm font-medium mb-1">No flights logged yet</div>
-            <div className="text-xs text-muted-foreground">Start logging your flights to see your route map and mileage history.</div>
+            <div className="text-xs text-muted-foreground mb-4">Scan a boarding pass or log a flight manually.</div>
+            <button
+              onClick={() => setShowScanner(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue/30 bg-blue/10 text-blue px-4 py-2 text-sm font-medium hover:bg-blue/20 transition-colors"
+            >
+              <ScanLine size={14} /> Scan boarding pass
+            </button>
           </div>
         )}
         {legs.map(leg => {
