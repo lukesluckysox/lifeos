@@ -13,6 +13,7 @@ import { Link } from "wouter";
 import { PillTabs } from "@/components/PillTabs";
 import { useTabParam } from "@/hooks/useTabParam";
 import Subscriptions from "@/pages/Subscriptions";
+import Cards from "@/pages/Cards";
 import { LookbackProvider } from "@/components/LookbackContext";
 import { LookbackPills } from "@/components/LookbackPills";
 import { SentimentEngine } from "@/components/SentimentEngine";
@@ -819,11 +820,12 @@ function EmptyCard({ label, sub }: { label: string; sub: string }) {
 }
 
 /* ============ Finance wrapper with tabs ============ */
-type FinanceTab = "portfolio" | "advisor" | "subscriptions";
+type FinanceTab = "portfolio" | "advisor" | "subscriptions" | "cards";
 const FINANCE_TABS = [
   { id: "portfolio" as const, label: "Portfolio" },
   { id: "advisor" as const, label: "Advisor" },
   { id: "subscriptions" as const, label: "Subscriptions" },
+  { id: "cards" as const, label: "Cards" },
 ];
 
 export default function Finance() {
@@ -831,6 +833,7 @@ export default function Finance() {
   const active: FinanceTab =
     tab === "advisor" ? "advisor" :
     tab === "subscriptions" ? "subscriptions" :
+    tab === "cards" ? "cards" :
     "portfolio";
 
   return (
@@ -842,6 +845,7 @@ export default function Finance() {
       {active === "portfolio" && <FinancePortfolio />}
       {active === "advisor" && <FinanceAdvisor />}
       {active === "subscriptions" && <Subscriptions />}
+      {active === "cards" && <Cards />}
     </div>
   );
 }

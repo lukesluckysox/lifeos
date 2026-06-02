@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Sun, Moon, Download, LogOut, Trash2, Plug, Check, X, AlertTriangle, ArrowUpRight } from "lucide-react";
+import Goals from "@/pages/Goals";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/components/AuthProvider";
@@ -185,6 +186,11 @@ export default function Settings() {
             </ul>
           )}
         </div>
+      </Section>
+
+      {/* Goals */}
+      <Section title="Goals">
+        <Goals />
       </Section>
 
       {/* Data */}

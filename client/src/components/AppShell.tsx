@@ -1,6 +1,6 @@
 import { ReactNode, useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Sun, Moon, Search, Music, MapPin, LineChart, Home as HomeIcon, Menu, X, Tv, Calendar, BellOff, Bell, Bookmark, RefreshCw, Settings, Loader2, CreditCard, Plane, TrendingUp, Target } from "lucide-react";
+import { Sun, Moon, Search, Music, MapPin, LineChart, Home as HomeIcon, Menu, X, Tv, Calendar, BellOff, Bell, Bookmark, RefreshCw, Settings, Loader2 } from "lucide-react";
 import { Wordmark } from "./Logo";
 import { useTheme } from "./ThemeProvider";
 import { useMode } from "./ModeProvider";
@@ -176,10 +176,6 @@ const NAV = [
   { href: "/events", label: "Events", icon: Calendar },
   { href: "/music", label: "Music", icon: Music },
   { href: "/watch", label: "Watch", icon: Tv },
-  { href: "/cards", label: "Cards", icon: CreditCard },
-  { href: "/flights", label: "Flights", icon: Plane },
-  { href: "/net-worth", label: "Net Worth", icon: TrendingUp },
-  { href: "/goals", label: "Goals", icon: Target },
   { href: "/saved", label: "Saved", icon: Bookmark },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

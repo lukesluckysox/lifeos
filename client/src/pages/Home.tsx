@@ -42,6 +42,7 @@ interface InsightItem { kind: string; severity: "info" | "watch" | "alert"; titl
 interface InsightsResp { insights: InsightItem[]; totalValue: number; asOf: string; }
 interface Neighborhood { name: string; note: string; }
 interface TodayGuide { city: string; sights: Array<{ name: string; note: string; }>; neighborhoods: Neighborhood[]; }
+interface NWEntry { id: number; kind: string; label: string; value: number; }
 
 /* ---------- Page ---------- */
 
@@ -90,6 +91,11 @@ export default function Home() {
     queryKey: ["/api/travel-guide", city],
     queryFn: async () => (await apiRequest("GET", withMode(`/api/travel-guide?city=${encodeURIComponent(city)}`))).json(),
   });
+  const { data: nwEntries = [] } = useQuery<NWEntry[]>({
+    queryKey: ["/api/net-worth"],
+    queryFn: async () => (await apiRequest("GET", "/api/net-worth")).json(),
+    enabled: !!user,
+  });
 
   /* Finance numbers */
   const plaidValue = portfolio?.plaid?.totalValue ?? 0;
@@ -99,6 +105,14 @@ export default function Home() {
   const manualDayChange = (portfolio?.manual ?? []).reduce((a, m) => a + (m.value * (m.dayChangePct / 100) || 0), 0);
   const dayChange = plaidDayChange + manualDayChange;
   const dayChangePct = netWorth > 0 ? (dayChange / (netWorth - dayChange)) * 100 : 0;
+
+  /* Net worth tracker */
+  const NW_ASSET_KINDS = ["asset_investment","asset_cash","asset_property","asset_vehicle","asset_other"];
+  const NW_DEBT_KINDS  = ["debt_mortgage","debt_auto","debt_student","debt_credit","debt_other"];
+  const nwTotalAssets = nwEntries.filter(e => NW_ASSET_KINDS.includes(e.kind)).reduce((s,e)=>s+e.value,0);
+  const nwTotalDebt   = nwEntries.filter(e => NW_DEBT_KINDS.includes(e.kind)).reduce((s,e)=>s+e.value,0);
+  const nwNetWorth    = nwTotalAssets - nwTotalDebt;
+  const hasNWData     = nwEntries.length > 0;
 
   /* Finance narrative */
   const topInsight = (insights?.insights ?? [])[0];
@@ -226,6 +240,31 @@ export default function Home() {
           )}
         </DashboardCard>
         </HomeCardWithPill>
+
+        {/* ===== Net Worth ===== */}
+        {hasNWData && (
+          <DashboardCard
+            href="/settings"
+            icon={<TrendingUp size={13} className="text-blue" />}
+            eyebrow="Net Worth"
+            testId="card-home-net-worth"
+          >
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-1">Total · USD</div>
+            <div className={`font-display text-2xl leading-none tabular ${nwNetWorth >= 0 ? "" : "text-rose"}`} data-testid="text-home-nw-tracker">
+              {nwNetWorth < 0 ? "-" : ""}${Math.abs(nwNetWorth).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 pt-3 border-t border-border/40">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Assets</div>
+                <div className="font-mono text-sm tabular text-green">${nwTotalAssets.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+              </div>
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Debt</div>
+                <div className="font-mono text-sm tabular text-rose">${nwTotalDebt.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+              </div>
+            </div>
+          </DashboardCard>
+        )}
 
         {/* ===== Places ===== */}
         <HomeCardWithPill domain="place">

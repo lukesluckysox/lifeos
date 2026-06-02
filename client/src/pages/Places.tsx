@@ -13,6 +13,7 @@ import { useLocation as useCity } from "@/components/LocationProvider";
 import { PillTabs } from "@/components/PillTabs";
 import { useTabParam } from "@/hooks/useTabParam";
 import Food from "@/pages/Food";
+import Flights from "@/pages/Flights";
 
 type Sight = { name: string; note: string; url?: string; pinned?: boolean; userItemId?: number };
 type Neighborhood = { name: string; note: string };
@@ -474,16 +475,17 @@ function PlacesMain() {
   );
 }
 
-/* ============ Places wrapper with Food tab ============ */
-type PlacesTab = "places" | "food";
+/* ============ Places wrapper with Food + Flights tabs ============ */
+type PlacesTab = "places" | "food" | "flights";
 const PLACES_TABS = [
   { id: "places" as const, label: "Places" },
   { id: "food" as const, label: "Food" },
+  { id: "flights" as const, label: "Flights" },
 ];
 
 export default function Places() {
   const [tab, setTab] = useTabParam<PlacesTab>("places");
-  const active: PlacesTab = tab === "food" ? "food" : "places";
+  const active: PlacesTab = tab === "food" ? "food" : tab === "flights" ? "flights" : "places";
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -491,7 +493,9 @@ export default function Places() {
         <div className="eyebrow">Places</div>
         <PillTabs tabs={PLACES_TABS} value={active} onChange={setTab} testIdPrefix="tab-places" />
       </div>
-      {active === "places" ? <PlacesMain /> : <Food />}
+      {active === "places" && <PlacesMain />}
+      {active === "food" && <Food />}
+      {active === "flights" && <Flights />}
     </div>
   );
 }
