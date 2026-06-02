@@ -235,56 +235,6 @@ sqlite.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
 
-  CREATE TABLE IF NOT EXISTS user_cards (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    card_id TEXT NOT NULL,
-    nickname TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id);
-  CREATE TABLE IF NOT EXISTS flight_legs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    origin TEXT NOT NULL,
-    destination TEXT NOT NULL,
-    origin_name TEXT,
-    destination_name TEXT,
-    airline TEXT,
-    flight_number TEXT,
-    departure_date TEXT NOT NULL,
-    cabin TEXT,
-    miles INTEGER,
-    notes TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_flight_legs_user ON flight_legs(user_id);
-  CREATE TABLE IF NOT EXISTS net_worth_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    label TEXT NOT NULL,
-    value REAL NOT NULL,
-    notes TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_net_worth_user ON net_worth_entries(user_id);
-  CREATE TABLE IF NOT EXISTS goals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    category TEXT NOT NULL,
-    target_value REAL NOT NULL,
-    current_value REAL NOT NULL DEFAULT 0,
-    unit TEXT NOT NULL,
-    deadline TEXT,
-    notes TEXT,
-    completed INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
   CREATE TABLE IF NOT EXISTS atlas_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL UNIQUE,
@@ -468,7 +418,7 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   // ── User Cards ──────────────────────────────────────────────────────────
   async listUserCards(userId: number): Promise<any[]> {
-    return db.select().from(sql`user_cards`).where(sql`user_id = ${userId}`).all() as any[];
+    return sqlite.prepare("SELECT * FROM user_cards WHERE user_id = ? ORDER BY created_at DESC").all(userId) as any[];
   }
   async addUserCard(userId: number, cardId: string, nickname?: string): Promise<any> {
     const now = Date.now();

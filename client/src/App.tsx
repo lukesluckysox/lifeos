@@ -20,6 +20,10 @@ import Finance from "@/pages/Finance";
 import Saved from "@/pages/Saved";
 import WhatsNew from "@/pages/WhatsNew";
 import Settings from "@/pages/Settings";
+import Cards from "@/pages/Cards";
+import Flights from "@/pages/Flights";
+import NetWorth from "@/pages/NetWorth";
+import Goals from "@/pages/Goals";
 import Landing from "@/pages/Landing";
 import NotFound from "@/pages/not-found";
 import { useEffect } from "react";
@@ -72,6 +76,10 @@ function AppRouter() {
         <Route path="/saved"><ErrorBoundary label="Saved page"><Saved /></ErrorBoundary></Route>
         <Route path="/whats-new"><ErrorBoundary label="What's New page"><WhatsNew /></ErrorBoundary></Route>
         <Route path="/settings"><ErrorBoundary label="Settings page"><Settings /></ErrorBoundary></Route>
+        <Route path="/cards"><ErrorBoundary label="Cards page"><Cards /></ErrorBoundary></Route>
+        <Route path="/flights"><ErrorBoundary label="Flights page"><Flights /></ErrorBoundary></Route>
+        <Route path="/net-worth"><ErrorBoundary label="Net Worth page"><NetWorth /></ErrorBoundary></Route>
+        <Route path="/goals"><ErrorBoundary label="Goals page"><Goals /></ErrorBoundary></Route>
         {/* Legacy redirects */}
         <Route path="/film">{() => <Redirect to="/watch?tab=film" />}</Route>
         <Route path="/food">{() => <Redirect to="/places?tab=food" />}</Route>

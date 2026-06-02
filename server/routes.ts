@@ -184,6 +184,8 @@ function loadSnapshot<T = any>(fileName: string): T | null {
 
 /* ------------ routes ------------ */
 
+import { CARD_DATABASE } from "./cardDatabase";
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -3467,6 +3469,164 @@ Rules: 5-6 sights, 4-5 neighborhoods, 3-4 day trips. Each note is 1 sentence, sp
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
+  });
+
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     CARDS — credit card benefits
+     ══════════════════════════════════════════════════════════════════════= */
+
+  // GET all cards in the benefits database
+  app.get("/api/cards/catalog", (_req, res) => {
+    return res.json(CARD_DATABASE.map(c => ({
+      id: c.id, name: c.name, issuer: c.issuer, network: c.network,
+      annualFee: c.annualFee, estimatedAnnualValue: c.estimatedAnnualValue,
+      color: c.color, benefitCount: c.benefits.length,
+    })));
+  });
+
+  // GET user's saved cards
+  app.get("/api/cards", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const saved = await storage.listUserCards(userId);
+    const enriched = saved.map((row: any) => {
+      const def = CARD_DATABASE.find(c => c.id === row.card_id);
+      return { ...row, definition: def ?? null };
+    });
+    return res.json(enriched);
+  });
+
+  // POST add a card
+  app.post("/api/cards", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const { cardId, nickname } = req.body as { cardId: string; nickname?: string };
+    if (!cardId) return res.status(400).json({ message: "cardId required" });
+    if (!CARD_DATABASE.find(c => c.id === cardId)) {
+      return res.status(404).json({ message: "Card not in database" });
+    }
+    const result = await storage.addUserCard(userId, cardId, nickname);
+    return res.json(result);
+  });
+
+  // DELETE remove a card
+  app.delete("/api/cards/:id", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const id = parseInt(req.params.id);
+    const result = await storage.removeUserCard(userId, id);
+    return result.changes > 0
+      ? res.json({ ok: true })
+      : res.status(404).json({ message: "Not found" });
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     FLIGHTS — manual flight log
+     ══════════════════════════════════════════════════════════════════════= */
+
+  app.get("/api/flights", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const legs = await storage.listFlightLegs(userId);
+    return res.json(legs);
+  });
+
+  app.post("/api/flights", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const { origin, destination, originName, destinationName, airline,
+            flightNumber, departureDate, cabin, miles, notes } = req.body as any;
+    if (!origin || !destination || !departureDate) {
+      return res.status(400).json({ message: "origin, destination, departureDate required" });
+    }
+    const leg = await storage.addFlightLeg(userId, {
+      origin, destination, originName, destinationName,
+      airline, flightNumber, departureDate, cabin, miles: miles ? parseInt(miles) : undefined, notes,
+    });
+    return res.json(leg);
+  });
+
+  app.delete("/api/flights/:id", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const id = parseInt(req.params.id);
+    const result = await storage.removeFlightLeg(userId, id);
+    return result.changes > 0
+      ? res.json({ ok: true })
+      : res.status(404).json({ message: "Not found" });
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     NET WORTH — manual asset/debt entries
+     ══════════════════════════════════════════════════════════════════════= */
+
+  app.get("/api/net-worth", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const entries = await storage.listNetWorthEntries(userId);
+    return res.json(entries);
+  });
+
+  app.post("/api/net-worth", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const { id, kind, label, value, notes } = req.body as any;
+    if (!kind || !label || value === undefined) {
+      return res.status(400).json({ message: "kind, label, value required" });
+    }
+    const VALID_KINDS = ["asset_investment", "asset_cash", "asset_property", "asset_vehicle", "asset_other", "debt_mortgage", "debt_auto", "debt_student", "debt_credit", "debt_other"];
+    if (!VALID_KINDS.includes(kind)) {
+      return res.status(400).json({ message: "Invalid kind" });
+    }
+    const entry = await storage.upsertNetWorthEntry(userId, { id: id ? parseInt(id) : undefined, kind, label, value: parseFloat(value), notes });
+    return res.json(entry);
+  });
+
+  app.delete("/api/net-worth/:id", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const id = parseInt(req.params.id);
+    const result = await storage.removeNetWorthEntry(userId, id);
+    return result.changes > 0
+      ? res.json({ ok: true })
+      : res.status(404).json({ message: "Not found" });
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     GOALS — progress tracking
+     ══════════════════════════════════════════════════════════════════════= */
+
+  app.get("/api/goals", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const goals = await storage.listGoals(userId);
+    return res.json(goals);
+  });
+
+  app.post("/api/goals", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const { title, category, targetValue, currentValue, unit, deadline, notes } = req.body as any;
+    if (!title || !category || targetValue === undefined || !unit) {
+      return res.status(400).json({ message: "title, category, targetValue, unit required" });
+    }
+    const goal = await storage.addGoal(userId, {
+      title, category, targetValue: parseFloat(targetValue),
+      currentValue: currentValue !== undefined ? parseFloat(currentValue) : 0,
+      unit, deadline, notes,
+    });
+    return res.json(goal);
+  });
+
+  app.patch("/api/goals/:id", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const id = parseInt(req.params.id);
+    const patch = req.body as any;
+    if (patch.targetValue !== undefined) patch.targetValue = parseFloat(patch.targetValue);
+    if (patch.currentValue !== undefined) patch.currentValue = parseFloat(patch.currentValue);
+    const updated = await storage.updateGoal(userId, id, patch);
+    return updated
+      ? res.json(updated)
+      : res.status(404).json({ message: "Not found" });
+  });
+
+  app.delete("/api/goals/:id", requireAuth, async (req, res) => {
+    const userId = req.user!.id;
+    const id = parseInt(req.params.id);
+    const result = await storage.removeGoal(userId, id);
+    return result.changes > 0
+      ? res.json({ ok: true })
+      : res.status(404).json({ message: "Not found" });
   });
 
   return httpServer;
