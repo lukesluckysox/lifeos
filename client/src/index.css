@@ -3,76 +3,101 @@
 @tailwind utilities;
 
 /* =============================================================
-   Life OS — editorial, dark-first design system
-   Palette: deep indigo / slate neutrals + warm gold + muted teal
-   Typography: Instrument Serif display + Inter body + JetBrains mono
+   Radius — professional dark-first design system v2
+   Palette: near-neutral zinc/slate + steel blue primary + warm gold accent
+   Typography: Instrument Serif display (numbers only) + Inter body + JetBrains mono
    ============================================================= */
 
 @import url('https://api.fontshare.com/v2/css?f[]=instrument-serif@400,401&f[]=satoshi@300,400,500,700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* LIGHT MODE — quiet, warm-paper editorial */
+/* ── LIGHT MODE ───────────────────────────────────────────────── */
 :root {
-  --button-outline: rgba(20, 22, 32, 0.08);
-  --badge-outline: rgba(20, 22, 32, 0.05);
+  --button-outline: rgba(12, 14, 18, 0.07);
+  --badge-outline: rgba(12, 14, 18, 0.04);
   --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(20, 22, 32, 0.035);
-  --elevate-2: rgba(20, 22, 32, 0.07);
+  --elevate-1: rgba(12, 14, 18, 0.03);
+  --elevate-2: rgba(12, 14, 18, 0.06);
 
-  --background: 36 18% 96%;      /* warm paper */
-  --foreground: 230 18% 12%;     /* deep indigo-ink */
-  --border: 36 12% 86%;
-  --card: 36 22% 98%;
-  --card-foreground: 230 18% 12%;
-  --card-border: 36 14% 88%;
-  --sidebar: 36 16% 94%;
-  --sidebar-foreground: 230 18% 12%;
-  --sidebar-border: 36 12% 86%;
-  --sidebar-primary: 184 38% 36%;
-  --sidebar-primary-foreground: 36 25% 98%;
-  --sidebar-accent: 36 14% 89%;
-  --sidebar-accent-foreground: 230 18% 12%;
-  --sidebar-ring: 184 38% 36%;
-  --popover: 36 22% 98%;
-  --popover-foreground: 230 18% 12%;
-  --popover-border: 36 14% 88%;
-  --primary: 184 38% 32%;        /* muted teal */
-  --primary-foreground: 36 25% 98%;
-  --secondary: 36 14% 90%;
-  --secondary-foreground: 230 18% 12%;
-  --muted: 36 12% 92%;
-  --muted-foreground: 230 8% 42%;
-  --accent: 36 30% 88%;
-  --accent-foreground: 230 18% 12%;
-  --destructive: 6 60% 44%;
-  --destructive-foreground: 36 25% 98%;
-  --input: 36 12% 80%;
-  --ring: 184 38% 36%;
+  /* Surfaces — warm white, not pure */
+  --background: 220 16% 97%;
+  --foreground: 220 20% 10%;
+  --border: 220 14% 88%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 20% 10%;
+  --card-border: 220 14% 90%;
+  --card-header: 220 16% 97%;     /* slightly off-white for header zone */
 
-  /* Editorial accents */
-  --accent-gold: 38 52% 48%;
-  --accent-teal: 184 38% 38%;
-  --accent-rose: 350 36% 56%;
+  /* Sidebar */
+  --sidebar: 220 14% 95%;
+  --sidebar-foreground: 220 20% 10%;
+  --sidebar-border: 220 14% 88%;
+  --sidebar-primary: 212 72% 42%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 220 14% 91%;
+  --sidebar-accent-foreground: 220 20% 10%;
+  --sidebar-ring: 212 72% 42%;
 
-  --chart-1: 184 38% 48%;
-  --chart-2: 38 52% 52%;
-  --chart-3: 230 28% 42%;
-  --chart-4: 350 32% 56%;
-  --chart-5: 168 22% 48%;
+  /* Overlays */
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 20% 10%;
+  --popover-border: 220 14% 88%;
 
+  /* Primary — steel blue (Stripe/Linear inspired) */
+  --primary: 212 72% 42%;
+  --primary-foreground: 0 0% 100%;
+
+  /* Neutrals */
+  --secondary: 220 14% 92%;
+  --secondary-foreground: 220 20% 10%;
+  --muted: 220 12% 94%;
+  --muted-foreground: 220 8% 44%;
+  --accent: 220 14% 90%;
+  --accent-foreground: 220 20% 10%;
+
+  /* Status */
+  --destructive: 4 72% 44%;
+  --destructive-foreground: 0 0% 100%;
+  --input: 220 14% 84%;
+  --ring: 212 72% 42%;
+
+  /* Semantic accents — used intentionally, not as defaults */
+  --accent-blue: 212 72% 46%;    /* primary */
+  --accent-gold: 38 58% 46%;     /* portfolio up, featured */
+  --accent-teal: 174 42% 38%;    /* legacy support */
+  --accent-rose: 348 56% 52%;    /* portfolio down, warnings */
+  --accent-green: 152 48% 36%;   /* positive signals */
+
+  /* Chart palette */
+  --chart-1: 212 72% 52%;
+  --chart-2: 38 58% 52%;
+  --chart-3: 174 42% 46%;
+  --chart-4: 348 52% 58%;
+  --chart-5: 262 48% 58%;
+
+  /* Typography */
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-serif: 'Instrument Serif', Georgia, serif;
   --font-mono: 'JetBrains Mono', Menlo, monospace;
-  --radius: 0.375rem;
+  --radius: 0.5rem;
 
-  --shadow-2xs: 0 1px 2px 0 hsl(230 30% 8% / 0.04);
-  --shadow-xs: 0 1px 3px 0 hsl(230 30% 8% / 0.05);
-  --shadow-sm: 0 2px 6px -2px hsl(230 30% 8% / 0.06);
-  --shadow: 0 4px 14px -4px hsl(230 30% 8% / 0.08);
-  --shadow-md: 0 8px 24px -8px hsl(230 30% 8% / 0.1);
-  --shadow-lg: 0 16px 40px -12px hsl(230 30% 8% / 0.14);
-  --shadow-xl: 0 24px 60px -20px hsl(230 30% 8% / 0.18);
-  --shadow-2xl: 0 32px 80px -24px hsl(230 30% 8% / 0.2);
+  /* Shadow system — crisp, not diffuse */
+  --shadow-2xs: 0 1px 2px 0 hsl(220 30% 8% / 0.04);
+  --shadow-xs: 0 1px 3px 0 hsl(220 30% 8% / 0.06), inset 0 1px 0 rgba(255,255,255,0.8);
+  --shadow-sm: 0 2px 4px -1px hsl(220 30% 8% / 0.08), inset 0 1px 0 rgba(255,255,255,0.6);
+  --shadow: 0 4px 12px -2px hsl(220 30% 8% / 0.1), inset 0 1px 0 rgba(255,255,255,0.5);
+  --shadow-md: 0 8px 20px -4px hsl(220 30% 8% / 0.12);
+  --shadow-lg: 0 16px 36px -8px hsl(220 30% 8% / 0.16);
+  --shadow-xl: 0 24px 52px -12px hsl(220 30% 8% / 0.20);
+  --shadow-2xl: 0 32px 72px -16px hsl(220 30% 8% / 0.24);
+
+  /* Card shadow — the key inset highlight */
+  --card-shadow: 0 1px 3px hsl(220 30% 8% / 0.08),
+                 0 1px 2px hsl(220 30% 8% / 0.06),
+                 inset 0 1px 0 rgba(255,255,255,0.9);
+  --card-shadow-hover: 0 4px 12px hsl(220 30% 8% / 0.12),
+                       0 2px 4px hsl(220 30% 8% / 0.06),
+                       inset 0 1px 0 rgba(255,255,255,0.9);
 
   --tracking-normal: 0em;
   --spacing: 0.25rem;
@@ -86,62 +111,87 @@
   --destructive-border: hsl(var(--destructive));
 }
 
-/* DARK MODE — deep indigo/slate, the default */
+/* ── DARK MODE ────────────────────────────────────────────────── */
 .dark {
-  --button-outline: rgba(255, 255, 255, 0.06);
-  --badge-outline: rgba(255, 255, 255, 0.04);
+  --button-outline: rgba(255, 255, 255, 0.055);
+  --badge-outline: rgba(255, 255, 255, 0.035);
   --opaque-button-border-intensity: 9;
-  --elevate-1: rgba(255, 255, 255, 0.035);
-  --elevate-2: rgba(255, 255, 255, 0.075);
+  --elevate-1: rgba(255, 255, 255, 0.03);
+  --elevate-2: rgba(255, 255, 255, 0.06);
 
-  --background: 230 22% 7%;        /* deep indigo-slate */
-  --foreground: 36 18% 90%;
-  --border: 230 14% 17%;
-  --card: 230 22% 9%;
-  --card-foreground: 36 18% 90%;
-  --card-border: 230 16% 15%;
-  --sidebar: 230 24% 8%;
-  --sidebar-foreground: 36 18% 90%;
-  --sidebar-border: 230 16% 15%;
-  --sidebar-primary: 184 42% 52%;
-  --sidebar-primary-foreground: 230 22% 7%;
-  --sidebar-accent: 230 16% 14%;
-  --sidebar-accent-foreground: 36 18% 90%;
-  --sidebar-ring: 184 42% 52%;
-  --popover: 230 22% 10%;
-  --popover-foreground: 36 18% 90%;
-  --popover-border: 230 16% 16%;
-  --primary: 184 38% 52%;
-  --primary-foreground: 230 22% 7%;
-  --secondary: 230 16% 14%;
-  --secondary-foreground: 36 18% 90%;
-  --muted: 230 14% 13%;
-  --muted-foreground: 230 8% 58%;
-  --accent: 230 16% 16%;
-  --accent-foreground: 36 18% 90%;
-  --destructive: 6 56% 56%;
-  --destructive-foreground: 36 18% 92%;
-  --input: 230 14% 22%;
-  --ring: 184 42% 52%;
+  /* Surfaces — near-neutral zinc, barely any hue cast */
+  --background: 220 13% 6%;       /* ~#0d0f12 — near-black, slight blue-grey */
+  --foreground: 220 10% 92%;      /* off-white, not warm */
+  --border: 220 13% 15%;          /* clearly visible against bg (+9pts) */
+  --card: 220 13% 9%;             /* one step lighter than bg */
+  --card-foreground: 220 10% 92%;
+  --card-border: 220 13% 16%;     /* +7pts from card — visible separation */
+  --card-header: 220 13% 11%;     /* header zone — slightly lighter than card body */
 
-  --accent-gold: 38 62% 60%;
-  --accent-teal: 184 42% 56%;
-  --accent-rose: 350 42% 64%;
+  /* Sidebar — one step darker than bg */
+  --sidebar: 220 14% 7%;
+  --sidebar-foreground: 220 10% 88%;
+  --sidebar-border: 220 13% 13%;
+  --sidebar-primary: 212 72% 58%;
+  --sidebar-primary-foreground: 220 13% 6%;
+  --sidebar-accent: 220 13% 12%;
+  --sidebar-accent-foreground: 220 10% 88%;
+  --sidebar-ring: 212 72% 58%;
 
-  --chart-1: 184 44% 56%;
-  --chart-2: 38 62% 60%;
-  --chart-3: 230 28% 64%;
-  --chart-4: 350 42% 64%;
-  --chart-5: 168 28% 56%;
+  /* Overlays */
+  --popover: 220 13% 10%;
+  --popover-foreground: 220 10% 92%;
+  --popover-border: 220 13% 16%;
 
-  --shadow-2xs: 0 1px 2px 0 hsl(0 0% 0% / 0.4);
-  --shadow-xs: 0 1px 3px 0 hsl(0 0% 0% / 0.45);
-  --shadow-sm: 0 2px 6px -2px hsl(0 0% 0% / 0.5);
-  --shadow: 0 4px 14px -4px hsl(0 0% 0% / 0.55);
-  --shadow-md: 0 8px 24px -8px hsl(0 0% 0% / 0.6);
-  --shadow-lg: 0 16px 40px -12px hsl(0 0% 0% / 0.7);
-  --shadow-xl: 0 24px 60px -20px hsl(0 0% 0% / 0.8);
-  --shadow-2xl: 0 32px 80px -24px hsl(0 0% 0% / 0.85);
+  /* Primary — crisp steel blue */
+  --primary: 212 72% 58%;
+  --primary-foreground: 220 13% 6%;
+
+  /* Neutrals */
+  --secondary: 220 13% 13%;
+  --secondary-foreground: 220 10% 92%;
+  --muted: 220 13% 11%;
+  --muted-foreground: 220 8% 52%;   /* cooler, more legible */
+  --accent: 220 13% 14%;
+  --accent-foreground: 220 10% 92%;
+
+  /* Status */
+  --destructive: 4 64% 56%;
+  --destructive-foreground: 220 10% 96%;
+  --input: 220 13% 18%;
+  --ring: 212 72% 58%;
+
+  /* Semantic accents */
+  --accent-blue: 212 72% 62%;
+  --accent-gold: 38 62% 58%;
+  --accent-teal: 174 44% 52%;
+  --accent-rose: 348 52% 60%;
+  --accent-green: 152 48% 48%;
+
+  /* Chart palette */
+  --chart-1: 212 72% 62%;
+  --chart-2: 38 62% 58%;
+  --chart-3: 174 44% 52%;
+  --chart-4: 348 52% 60%;
+  --chart-5: 262 52% 64%;
+
+  /* Shadow system — dark mode: deeper, punchier */
+  --shadow-2xs: 0 1px 2px hsl(0 0% 0% / 0.36);
+  --shadow-xs: 0 1px 3px hsl(0 0% 0% / 0.40);
+  --shadow-sm: 0 2px 6px -1px hsl(0 0% 0% / 0.44);
+  --shadow: 0 4px 12px -2px hsl(0 0% 0% / 0.48);
+  --shadow-md: 0 8px 24px -4px hsl(0 0% 0% / 0.56);
+  --shadow-lg: 0 16px 40px -8px hsl(0 0% 0% / 0.64);
+  --shadow-xl: 0 24px 60px -12px hsl(0 0% 0% / 0.72);
+  --shadow-2xl: 0 32px 80px -16px hsl(0 0% 0% / 0.80);
+
+  /* Card shadow — inset top highlight is what makes dark cards pop */
+  --card-shadow: 0 1px 3px hsl(0 0% 0% / 0.4),
+                 0 1px 2px hsl(0 0% 0% / 0.3),
+                 inset 0 1px 0 hsl(220 13% 22% / 0.6);
+  --card-shadow-hover: 0 4px 12px hsl(0 0% 0% / 0.5),
+                       0 2px 4px hsl(0 0% 0% / 0.3),
+                       inset 0 1px 0 hsl(220 13% 26% / 0.7);
 
   --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-accent-border: hsl(var(--sidebar-accent));
@@ -152,6 +202,7 @@
   --destructive-border: hsl(var(--destructive));
 }
 
+/* ── BASE LAYER ───────────────────────────────────────────────── */
 @layer base {
   * {
     @apply border-border;
@@ -166,14 +217,14 @@
   body {
     @apply font-sans antialiased bg-background text-foreground;
     font-feature-settings: 'ss01', 'cv11';
-    letter-spacing: -0.005em;
+    letter-spacing: -0.006em;
   }
 
-  /* Editorial display type — used sparingly for editorial moments */
+  /* Display type — only for large numbers + hero moments */
   .font-display {
     font-family: var(--font-serif);
     font-weight: 400;
-    letter-spacing: -0.015em;
+    letter-spacing: -0.02em;
     line-height: 1;
   }
 
@@ -181,13 +232,13 @@
     font-family: var(--font-mono);
   }
 
-  /* Subtle uppercase eyebrow label used across the app */
+  /* Eyebrow label — used for section headers, card labels */
   .eyebrow {
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.16em;
     color: hsl(var(--muted-foreground));
   }
 
@@ -196,15 +247,55 @@
     background: hsl(var(--border));
   }
 
-  /* Editorial number — used for finance and metrics */
+  /* Tabular numbers for financial data */
   .tabular {
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum';
   }
+
+  /* ── Semantic color utilities ───────────────────────────────── */
+  .text-blue  { color: hsl(var(--accent-blue));  }
+  .text-gold  { color: hsl(var(--accent-gold));  }
+  .text-teal  { color: hsl(var(--accent-teal));  }
+  .text-rose  { color: hsl(var(--accent-rose));  }
+  .text-green { color: hsl(var(--accent-green)); }
+
+  .bg-blue\/10  { background: hsl(var(--accent-blue)  / 0.1); }
+  .bg-gold\/10  { background: hsl(var(--accent-gold)  / 0.1); }
+  .bg-teal\/10  { background: hsl(var(--accent-teal)  / 0.1); }
+  .bg-rose\/10  { background: hsl(var(--accent-rose)  / 0.1); }
+  .bg-green\/10 { background: hsl(var(--accent-green) / 0.1); }
+
+  .border-blue\/30  { border-color: hsl(var(--accent-blue)  / 0.3); }
+  .border-gold\/30  { border-color: hsl(var(--accent-gold)  / 0.3); }
+  .border-teal\/30  { border-color: hsl(var(--accent-teal)  / 0.3); }
+  .border-rose\/30  { border-color: hsl(var(--accent-rose)  / 0.3); }
 }
 
+/* ── UTILITIES ────────────────────────────────────────────────── */
 @layer utilities {
-  /* Subtle animated grain over background for atmosphere */
+
+  /* Dashboard card — professional elevated treatment */
+  .dash-card {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--card-border));
+    border-radius: var(--radius);
+    box-shadow: var(--card-shadow);
+    transition: box-shadow 150ms ease, border-color 150ms ease;
+  }
+  .dash-card:hover {
+    box-shadow: var(--card-shadow-hover);
+    border-color: hsl(var(--primary) / 0.3);
+  }
+
+  /* Card header zone — slightly different surface from card body */
+  .dash-card-header {
+    background: hsl(var(--card-header));
+    border-bottom: 1px solid hsl(var(--card-border));
+    border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+  }
+
+  /* Subtle background radial — replaces the teal/gold gradient blobs */
   .atmosphere-grain {
     position: relative;
   }
@@ -214,10 +305,10 @@
     inset: 0;
     pointer-events: none;
     z-index: 0;
-    opacity: 0.025;
+    opacity: 0.018;
     background-image:
-      radial-gradient(circle at 25% 20%, hsl(var(--accent-teal)) 0%, transparent 35%),
-      radial-gradient(circle at 80% 70%, hsl(var(--accent-gold)) 0%, transparent 40%);
+      radial-gradient(ellipse 60% 40% at 15% 20%, hsl(var(--accent-blue)), transparent),
+      radial-gradient(ellipse 50% 35% at 85% 75%, hsl(var(--accent-gold)), transparent);
   }
 
   input[type='search']::-webkit-search-cancel-button {

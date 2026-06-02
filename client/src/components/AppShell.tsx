@@ -158,7 +158,7 @@ function CitySearch({
               type="button"
               data-testid={`button-location-quick-${c.toLowerCase().replace(/\s+/g, "-")}`}
               onClick={() => onPick(c)}
-              className={`text-[11px] rounded-full border px-2 py-1 transition ${current === c ? "border-teal bg-teal/10 text-teal" : "border-border hover:bg-accent"}`}
+              className={`text-[11px] rounded-full border px-2 py-1 transition ${current === c ? "border-blue/40 bg-blue/10 text-blue" : "border-border hover:bg-accent"}`}
             >
               {c}
             </button>
@@ -256,7 +256,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                         : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
                     }`}
                   >
-                    <Icon size={15} strokeWidth={1.6} className={active ? "text-teal" : ""} />
+                    <Icon size={15} strokeWidth={1.6} className={active ? "text-blue" : ""} />
                     <span className="font-medium tracking-tight">{label}</span>
                     {active && (
                       <span className="ml-auto h-1 w-1 rounded-full bg-teal" />
@@ -288,16 +288,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="mt-3 flex items-center gap-2">
               <Link href="/whats-new">
                 <span
-                  className="inline-flex items-center gap-1 rounded-full bg-teal/10 hover:bg-teal/20 text-teal px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] cursor-pointer transition-colors"
+                  className="inline-flex items-center gap-1 rounded-full bg-blue/10 hover:bg-blue/20 text-blue px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] cursor-pointer transition-colors"
                   data-testid="badge-version"
                 >
-                  <span className="w-1 h-1 rounded-full bg-teal animate-pulse" />
+                  <span className="w-1 h-1 rounded-full bg-blue animate-pulse" />
                   v0.4
                 </span>
               </Link>
               <Link href="/whats-new">
                 <span
-                  className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60 hover:text-teal transition-colors cursor-pointer"
+                  className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60 hover:text-blue transition-colors cursor-pointer"
                   data-testid="link-whats-new-hint"
                 >
                   what’s new
@@ -339,7 +339,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     title={`Location \u2014 used across Food, Concerts, and Places. Currently: ${city}`}
                     className="h-8 inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 hover:bg-accent px-3 transition-colors"
                   >
-                    <MapPin size={12} className="text-teal" />
+                    <MapPin size={12} className="text-blue" />
                     <span className="font-mono text-[11px] uppercase tracking-wider">{city}</span>
                   </button>
                   {locOpen && (
@@ -373,7 +373,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   className="group h-8 inline-flex items-center rounded-full border border-border bg-secondary/40 hover:bg-accent transition-colors p-0.5 font-mono text-[10px] uppercase tracking-wider"
                   title={mode === "live" ? "Showing your real data. Click to switch to sample data." : "Showing sample data \u2014 safe to share. Click to switch back to your data."}
                 >
-                  <span className={`px-2.5 py-1 rounded-full transition-colors ${mode === "live" ? "bg-teal text-background" : "text-muted-foreground"}`}>
+                  <span className={`px-2.5 py-1 rounded-full transition-colors ${mode === "live" ? "bg-blue text-white" : "text-muted-foreground"}`}>
                     <span className="flex items-center gap-1.5">
                       <span className={`h-1.5 w-1.5 rounded-full ${mode === "live" ? "bg-background animate-pulse" : "bg-muted-foreground"}`} />
                       Live
@@ -404,7 +404,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                             <button
                               data-testid="button-quiet-reset"
                               onClick={() => { resetQuiet(); }}
-                              className="font-mono text-[10px] uppercase tracking-wider text-teal hover:underline"
+                              className="font-mono text-[10px] uppercase tracking-wider text-blue hover:underline"
                             >
                               Clear
                             </button>
@@ -440,7 +440,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   title="Refresh data on this page"
                   className="h-8 w-8 grid place-items-center rounded-md border border-border hover:bg-accent transition-colors disabled:opacity-60"
                 >
-                  <RefreshCw size={14} className={refreshing ? "animate-spin text-teal" : ""} />
+                  <RefreshCw size={14} className={refreshing ? "animate-spin text-blue" : ""} />
                 </button>
                 <button
                   data-testid="button-theme-toggle"

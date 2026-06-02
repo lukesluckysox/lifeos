@@ -71,7 +71,7 @@ export default function Settings() {
       <section className="pt-2 max-w-2xl">
         <div className="eyebrow mb-4">Settings</div>
         <h1 className="font-display text-[clamp(1.5rem,3.5vw,2.5rem)] leading-[1.05] tracking-tight">
-          Your <span className="text-teal italic">Radius</span>.
+          Your <span className="text-blue italic">Radius</span>.
         </h1>
         <p className="mt-3 text-base text-muted-foreground max-w-xl leading-relaxed">
           Manage your account, connected services, and data.
@@ -98,7 +98,7 @@ export default function Settings() {
               type="button"
               onClick={toggle}
               data-testid="button-toggle-theme"
-              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:border-teal/40 transition-colors"
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:border-blue/30 transition-colors"
             >
               {theme === "dark" ? <Moon size={12} /> : <Sun size={12} />}
               {theme === "dark" ? "Dark" : "Light"}
@@ -134,7 +134,7 @@ export default function Settings() {
             <button
               type="button"
               onClick={loginWithSpotify}
-              className="text-xs text-teal hover:text-teal/80 transition-colors font-mono uppercase tracking-wider inline-flex items-center gap-1"
+              className="text-xs text-blue hover:text-blue/80 transition-colors font-mono uppercase tracking-wider inline-flex items-center gap-1"
               data-testid="button-connect-spotify"
             >
               <Plug size={11} />
@@ -169,7 +169,7 @@ export default function Settings() {
                   data-testid={`row-plaid-item-${p.id}`}
                 >
                   <div className="flex items-center gap-2">
-                    <Check size={12} className="text-teal shrink-0" />
+                    <Check size={12} className="text-blue shrink-0" />
                     <span>{p.institutionName || "Connected institution"}</span>
                   </div>
                   <button
@@ -197,7 +197,7 @@ export default function Settings() {
             type="button"
             onClick={exportData}
             disabled={exporting}
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-card hover:border-teal/40 transition-colors px-3 py-2 text-xs disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-card hover:border-blue/30 transition-colors px-3 py-2 text-xs disabled:opacity-50"
             data-testid="button-export-data"
           >
             <Download size={12} />
@@ -206,7 +206,7 @@ export default function Settings() {
           <button
             type="button"
             onClick={logout}
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-card hover:border-teal/40 transition-colors px-3 py-2 text-xs"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-card hover:border-blue/30 transition-colors px-3 py-2 text-xs"
             data-testid="button-logout"
           >
             <LogOut size={12} />
@@ -274,7 +274,7 @@ export default function Settings() {
             <Link href="/whats-new">
               <span
                 data-testid="link-settings-whats-new"
-                className="inline-flex items-center gap-1 text-xs text-teal hover:text-teal/80 transition-colors font-mono uppercase tracking-wider cursor-pointer"
+                className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80 transition-colors font-mono uppercase tracking-wider cursor-pointer"
               >
                 What’s new <ArrowUpRight size={11} />
               </span>
@@ -290,7 +290,7 @@ export default function Settings() {
               target="_blank"
               rel="noopener noreferrer"
               data-testid="link-settings-atlas"
-              className="inline-flex items-center gap-1 text-xs text-teal hover:text-teal/80 transition-colors font-mono uppercase tracking-wider"
+              className="inline-flex items-center gap-1 text-xs text-blue hover:text-blue/80 transition-colors font-mono uppercase tracking-wider"
             >
               Open Atlas <ArrowUpRight size={11} />
             </a>
@@ -323,11 +323,11 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 const ACCENTS: { id: Accent; label: string; hsl: string }[] = [
-  { id: "teal",   label: "Teal",   hsl: "hsl(184 42% 52%)" },
+  { id: "blue",   label: "Blue",   hsl: "hsl(212 72% 58%)" },
+  { id: "teal",   label: "Teal",   hsl: "hsl(174 44% 48%)" },
   { id: "gold",   label: "Gold",   hsl: "hsl(38 62% 52%)"  },
   { id: "violet", label: "Violet", hsl: "hsl(258 52% 60%)" },
-  { id: "rose",   label: "Rose",   hsl: "hsl(350 46% 58%)" },
-  { id: "slate",  label: "Slate",  hsl: "hsl(220 14% 60%)" },
+  { id: "rose",   label: "Rose",   hsl: "hsl(348 52% 58%)" },
 ];
 
 function AccentPicker({ accent, setAccent }: { accent: Accent; setAccent: (a: Accent) => void }) {

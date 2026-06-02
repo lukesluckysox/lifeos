@@ -185,6 +185,106 @@ sqlite.exec(`
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_plaid_items_user ON plaid_items(user_id);
+
+  CREATE TABLE IF NOT EXISTS user_cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    card_id TEXT NOT NULL,
+    nickname TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id);
+  CREATE TABLE IF NOT EXISTS flight_legs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    origin TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    airline TEXT,
+    flight_number TEXT,
+    date TEXT NOT NULL,
+    miles INTEGER,
+    seat_class TEXT,
+    notes TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_flight_legs_user ON flight_legs(user_id);
+  CREATE TABLE IF NOT EXISTS net_worth_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    value REAL NOT NULL,
+    notes TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_nw_user ON net_worth_entries(user_id);
+  CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    target REAL NOT NULL,
+    current REAL NOT NULL DEFAULT 0,
+    unit TEXT NOT NULL,
+    deadline TEXT,
+    notes TEXT,
+    completed INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
+
+  CREATE TABLE IF NOT EXISTS user_cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    card_id TEXT NOT NULL,
+    nickname TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id);
+  CREATE TABLE IF NOT EXISTS flight_legs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    origin TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    origin_name TEXT,
+    destination_name TEXT,
+    airline TEXT,
+    flight_number TEXT,
+    departure_date TEXT NOT NULL,
+    cabin TEXT,
+    miles INTEGER,
+    notes TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_flight_legs_user ON flight_legs(user_id);
+  CREATE TABLE IF NOT EXISTS net_worth_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    value REAL NOT NULL,
+    notes TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_net_worth_user ON net_worth_entries(user_id);
+  CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    target_value REAL NOT NULL,
+    current_value REAL NOT NULL DEFAULT 0,
+    unit TEXT NOT NULL,
+    deadline TEXT,
+    notes TEXT,
+    completed INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
   CREATE TABLE IF NOT EXISTS atlas_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL UNIQUE,
@@ -366,6 +466,111 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  // ── User Cards ──────────────────────────────────────────────────────────
+  async listUserCards(userId: number): Promise<any[]> {
+    return db.select().from(sql`user_cards`).where(sql`user_id = ${userId}`).all() as any[];
+  }
+  async addUserCard(userId: number, cardId: string, nickname?: string): Promise<any> {
+    const now = Date.now();
+    const result = sqlite.prepare(
+      "INSERT INTO user_cards (user_id, card_id, nickname, created_at) VALUES (?, ?, ?, ?)"
+    ).run(userId, cardId, nickname ?? null, now);
+    return { id: result.lastInsertRowid, userId, cardId, nickname, createdAt: now };
+  }
+  async removeUserCard(userId: number, id: number): Promise<{ changes: number }> {
+    const result = sqlite.prepare("DELETE FROM user_cards WHERE id = ? AND user_id = ?").run(id, userId);
+    return { changes: result.changes };
+  }
+
+  // ── Flight Legs ──────────────────────────────────────────────────────────
+  async listFlightLegs(userId: number): Promise<any[]> {
+    return sqlite.prepare("SELECT * FROM flight_legs WHERE user_id = ? ORDER BY departure_date DESC").all(userId) as any[];
+  }
+  async addFlightLeg(userId: number, leg: {
+    origin: string; destination: string; originName?: string; destinationName?: string;
+    airline?: string; flightNumber?: string; departureDate: string;
+    cabin?: string; miles?: number; notes?: string;
+  }): Promise<any> {
+    const now = Date.now();
+    const result = sqlite.prepare(`
+      INSERT INTO flight_legs (user_id, origin, destination, origin_name, destination_name,
+        airline, flight_number, departure_date, cabin, miles, notes, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, leg.origin.toUpperCase(), leg.destination.toUpperCase(),
+        leg.originName ?? null, leg.destinationName ?? null,
+        leg.airline ?? null, leg.flightNumber ?? null, leg.departureDate,
+        leg.cabin ?? null, leg.miles ?? null, leg.notes ?? null, now);
+    return { id: result.lastInsertRowid, ...leg, userId, createdAt: now };
+  }
+  async removeFlightLeg(userId: number, id: number): Promise<{ changes: number }> {
+    const result = sqlite.prepare("DELETE FROM flight_legs WHERE id = ? AND user_id = ?").run(id, userId);
+    return { changes: result.changes };
+  }
+
+  // ── Net Worth Entries ────────────────────────────────────────────────────
+  async listNetWorthEntries(userId: number): Promise<any[]> {
+    return sqlite.prepare("SELECT * FROM net_worth_entries WHERE user_id = ? ORDER BY kind, label").all(userId) as any[];
+  }
+  async upsertNetWorthEntry(userId: number, entry: {
+    id?: number; kind: string; label: string; value: number; notes?: string;
+  }): Promise<any> {
+    const now = Date.now();
+    if (entry.id) {
+      sqlite.prepare(`
+        UPDATE net_worth_entries SET kind=?, label=?, value=?, notes=?, updated_at=?
+        WHERE id=? AND user_id=?
+      `).run(entry.kind, entry.label, entry.value, entry.notes ?? null, now, entry.id, userId);
+      return { ...entry, userId, updatedAt: now };
+    }
+    const result = sqlite.prepare(`
+      INSERT INTO net_worth_entries (user_id, kind, label, value, notes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, entry.kind, entry.label, entry.value, entry.notes ?? null, now, now);
+    return { id: result.lastInsertRowid, ...entry, userId, createdAt: now, updatedAt: now };
+  }
+  async removeNetWorthEntry(userId: number, id: number): Promise<{ changes: number }> {
+    const result = sqlite.prepare("DELETE FROM net_worth_entries WHERE id = ? AND user_id = ?").run(id, userId);
+    return { changes: result.changes };
+  }
+
+  // ── Goals ─────────────────────────────────────────────────────────────────
+  async listGoals(userId: number): Promise<any[]> {
+    return sqlite.prepare("SELECT * FROM goals WHERE user_id = ? ORDER BY completed ASC, deadline ASC, created_at DESC").all(userId) as any[];
+  }
+  async addGoal(userId: number, goal: {
+    title: string; category: string; targetValue: number; currentValue?: number;
+    unit: string; deadline?: string; notes?: string;
+  }): Promise<any> {
+    const now = Date.now();
+    const result = sqlite.prepare(`
+      INSERT INTO goals (user_id, title, category, target_value, current_value, unit, deadline, notes, completed, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(userId, goal.title, goal.category, goal.targetValue, goal.currentValue ?? 0,
+        goal.unit, goal.deadline ?? null, goal.notes ?? null, now, now);
+    return { id: result.lastInsertRowid, ...goal, userId, completed: 0, createdAt: now, updatedAt: now };
+  }
+  async updateGoal(userId: number, id: number, patch: {
+    title?: string; category?: string; targetValue?: number; currentValue?: number;
+    unit?: string; deadline?: string; notes?: string; completed?: number;
+  }): Promise<any> {
+    const now = Date.now();
+    const existing: any = sqlite.prepare("SELECT * FROM goals WHERE id = ? AND user_id = ?").get(id, userId);
+    if (!existing) return undefined;
+    const merged = { ...existing, ...patch, updated_at: now };
+    sqlite.prepare(`
+      UPDATE goals SET title=?, category=?, target_value=?, current_value=?, unit=?,
+        deadline=?, notes=?, completed=?, updated_at=? WHERE id=? AND user_id=?
+    `).run(merged.title, merged.category, merged.target_value ?? patch.targetValue ?? existing.target_value,
+        merged.current_value ?? patch.currentValue ?? existing.current_value,
+        merged.unit, merged.deadline ?? null, merged.notes ?? null,
+        merged.completed ?? 0, now, id, userId);
+    return { ...merged, id };
+  }
+  async removeGoal(userId: number, id: number): Promise<{ changes: number }> {
+    const result = sqlite.prepare("DELETE FROM goals WHERE id = ? AND user_id = ?").run(id, userId);
+    return { changes: result.changes };
+  }
+
   async deleteUserAndAllData(userId: number): Promise<{ changes: number }> {
     // Order matters: delete children before the user row. Sessions and
     // secrets are keyed by user_id, holdings/watchlist/etc. likewise.

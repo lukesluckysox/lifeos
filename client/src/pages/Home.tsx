@@ -182,13 +182,13 @@ export default function Home() {
       <div className="hairline" />
 
       {/* ---- 5-card grid ---- */}
-      <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+      <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
 
         {/* ===== Finance ===== */}
         <HomeCardWithPill domain="stock">
         <DashboardCard
           href="/finance"
-          icon={<LineChart size={14} className="text-teal" />}
+          icon={<LineChart size={13} className="text-blue" />}
           eyebrow="Finance"
           testId="card-home-finance"
         >
@@ -199,11 +199,11 @@ export default function Home() {
           {netWorth > 0 ? (
             <>
               <div className="mt-2 flex items-center gap-2 text-xs">
-                {dayChange >= 0 ? <TrendingUp size={12} className="text-teal" /> : <TrendingDown size={12} className="text-rose" />}
-                <span className={`${dayChange >= 0 ? "text-teal" : "text-rose"} tabular font-mono`}>
+                {dayChange >= 0 ? <TrendingUp size={12} className="text-blue" /> : <TrendingDown size={12} className="text-rose" />}
+                <span className={`${dayChange >= 0 ? "text-blue" : "text-rose"} tabular font-mono`}>
                   {dayChange >= 0 ? "+" : "−"}${Math.abs(dayChange).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </span>
-                <span className={`tabular font-mono ${dayChange >= 0 ? "text-teal" : "text-rose"}`}>
+                <span className={`tabular font-mono ${dayChange >= 0 ? "text-blue" : "text-rose"}`}>
                   ({dayChange >= 0 ? "+" : ""}{dayChangePct.toFixed(2)}%)
                 </span>
                 <span className="text-muted-foreground">today</span>
@@ -231,22 +231,22 @@ export default function Home() {
         <HomeCardWithPill domain="place">
         <DashboardCard
           href="/places"
-          icon={<MapPin size={14} className="text-teal" />}
+          icon={<MapPin size={13} className="text-blue" />}
           eyebrow={`Places · ${guide?.city ?? city}`}
           testId="card-home-places"
         >
-          <div className="font-display text-lg leading-tight mb-3">Top sights</div>
+          <div className="text-sm font-semibold text-foreground/80 mb-3">Top sights</div>
           {topSights.length > 0 ? (
             <ul className="space-y-2.5">
               {topSights.map((s, i) => (
                 <li key={`${s.name}-${i}`} className="text-sm leading-snug flex items-start gap-2" data-testid={`item-home-sight-${i}`}>
-                  <span className="mt-1 h-1 w-1 rounded-full bg-teal shrink-0" />
+                  <span className="mt-1 h-1 w-1 rounded-full bg-blue shrink-0" />
                   <span className="flex-1 min-w-0">
                     <span className="font-medium truncate block" title={s.name}>{s.name}</span>
                     <span className="text-xs text-muted-foreground line-clamp-1">{s.note}</span>
                   </span>
                   {s.pinned && (
-                    <span className="font-mono text-[9px] uppercase tracking-wider text-teal border border-teal/40 rounded px-1 py-0.5 shrink-0">
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-blue border border-blue/30 rounded px-1 py-0.5 shrink-0">
                       pinned
                     </span>
                   )}
@@ -263,11 +263,11 @@ export default function Home() {
         <HomeCardWithPill domain="event">
         <DashboardCard
           href="/events"
-          icon={<CalIcon size={14} className="text-teal" />}
+          icon={<CalIcon size={13} className="text-blue" />}
           eyebrow={`Events · ${city}`}
           testId="card-home-events"
         >
-          <div className="font-display text-lg leading-tight mb-3">Concerts for you</div>
+          <div className="text-sm font-semibold text-foreground/80 mb-3">Concerts for you</div>
           {upcomingConcerts.length > 0 ? (
             <ul className="space-y-2.5">
               {upcomingConcerts.map((c, i) => (
@@ -290,7 +290,7 @@ export default function Home() {
         <HomeCardWithPill domain="artist">
         <DashboardCard
           href="/music"
-          icon={<MusicIcon size={14} className="text-teal" />}
+          icon={<MusicIcon size={13} className="text-blue" />}
           eyebrow="Music · recently played"
           testId="card-home-music"
         >
@@ -320,7 +320,7 @@ export default function Home() {
         <HomeCardWithPill domain="show">
         <DashboardCard
           href="/watch"
-          icon={<Tv size={14} className="text-teal" />}
+          icon={<Tv size={13} className="text-blue" />}
           eyebrow="Watch · for tonight"
           testId="card-home-watch"
         >
@@ -331,7 +331,7 @@ export default function Home() {
                   <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground shrink-0 w-12">{it.kind} · {it.year || "—"}</span>
                   <span className="font-medium truncate flex-1" title={it.title}>{it.title}</span>
                   {it.pinned && (
-                    <span className="font-mono text-[9px] uppercase tracking-wider text-teal border border-teal/40 rounded px-1 py-0.5 shrink-0">
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-blue border border-blue/30 rounded px-1 py-0.5 shrink-0">
                       pinned
                     </span>
                   )}
@@ -357,7 +357,7 @@ export default function Home() {
             href="https://traces.up.railway.app"
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-teal transition-colors inline-flex items-center gap-1"
+            className="hover:text-blue transition-colors inline-flex items-center gap-1"
             data-testid="link-footer-atlas"
           >
             Atlas · the sibling app
@@ -401,18 +401,20 @@ function DashboardCard({
 }) {
   return (
     <Link href={href} data-testid={testId}>
-      <div className="group relative rounded-xl border border-border bg-card/70 hover:bg-card hover:border-teal/40 transition-colors p-5 cursor-pointer h-full flex flex-col">
-        <div className="flex items-center justify-between mb-4">
+      <div className="group dash-card overflow-hidden cursor-pointer flex flex-col">
+        {/* Header zone — distinct surface from card body */}
+        <div className="dash-card-header flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2 eyebrow">
             {icon}
             <span>{eyebrow}</span>
           </div>
           <ArrowUpRight
-            size={14}
-            className="text-muted-foreground group-hover:text-teal transition-colors"
+            size={13}
+            className="text-muted-foreground/40 group-hover:text-blue transition-colors"
           />
         </div>
-        <div className="flex-1">{children}</div>
+        {/* Card body */}
+        <div className="px-4 py-4 flex-1">{children}</div>
       </div>
     </Link>
   );
@@ -424,7 +426,7 @@ function Stat({ label, pct }: { label: string; pct?: number }) {
   return (
     <div>
       <div className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground mb-0.5">{label}</div>
-      <div className={`font-mono tabular text-xs ${positive ? "text-teal" : "text-rose"}`}>
+      <div className={`font-mono tabular text-xs ${positive ? "text-blue" : "text-rose"}`}>
         {pct == null ? "—" : `${positive ? "+" : ""}${v.toFixed(1)}%`}
       </div>
     </div>
@@ -451,7 +453,7 @@ function Sparkline({ points, positive }: { points: { t: string; v: number }[]; p
   }));
   const line = coords.map((c, i) => (i === 0 ? `M${c.x},${c.y}` : `L${c.x},${c.y}`)).join(" ");
   const area = `${line} L${coords[coords.length - 1].x},${h} L${coords[0].x},${h} Z`;
-  const lineColor = positive ? "hsl(var(--teal, 178 56% 51%))" : "hsl(var(--rose, 350 65% 60%))";
+  const lineColor = positive ? "hsl(var(--accent-blue))" : "hsl(var(--rose, 350 65% 60%))";
   const fillColor = positive ? "rgba(79, 152, 163, 0.18)" : "rgba(209, 99, 167, 0.18)";
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-12" preserveAspectRatio="none" data-testid="sparkline-home-portfolio">
@@ -484,12 +486,12 @@ function OnboardingChecklist({
 
   return (
     <section
-      className="rounded-xl border border-teal/20 bg-teal/5 p-5"
+      className="rounded-xl border border-blue/20 bg-blue/5 p-5"
       data-testid="section-home-onboarding"
     >
       <div className="flex items-start justify-between gap-4 mb-4">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-teal mb-1">Getting started · {pct}%</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-blue mb-1">Getting started · {pct}%</div>
           <h2 className="font-display text-lg leading-tight">
             {allCoreDone ? "You’re all set — dismiss this?" : "Connect a few things to make Radius yours."}
           </h2>
@@ -510,7 +512,7 @@ function OnboardingChecklist({
           <li key={s.id} className="flex items-center gap-3 text-sm">
             <span
               className={`inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0 ${
-                s.done ? "bg-teal text-black" : "bg-card border border-border"
+                s.done ? "bg-blue text-white" : "bg-card border border-border"
               }`}
               data-testid={`onboarding-step-${s.id}-${s.done ? "done" : "pending"}`}
             >
@@ -520,7 +522,7 @@ function OnboardingChecklist({
               <span className="text-muted-foreground line-through">{s.label}</span>
             ) : s.href ? (
               <Link href={s.href}>
-                <span className="hover:text-teal transition-colors cursor-pointer" data-testid={`link-onboarding-${s.id}`}>
+                <span className="hover:text-blue transition-colors cursor-pointer" data-testid={`link-onboarding-${s.id}`}>
                   {s.label}
                 </span>
               </Link>
@@ -556,16 +558,16 @@ function HeroGreeting({
         {mode === "demo" && <span className="ml-2 text-gold">· demo mode</span>}
       </div>
       <h1 className="font-display text-[clamp(1.875rem,4vw,3rem)] leading-[1.05] tracking-tight max-w-3xl">
-        Good {partOfDay}, <span className="text-teal italic">{firstName}</span>.
+        Good {partOfDay}, <span className="text-blue italic">{firstName}</span>.
       </h1>
       <p className="mt-3 text-base text-muted-foreground max-w-2xl leading-relaxed" data-testid="text-home-hero-summary">
         {Math.abs(dayChange) > 0 ? (
           <>
             Your portfolio is{" "}
-            <span className={`font-mono tabular ${positive ? "text-teal" : "text-rose"}`}>
+            <span className={`font-mono tabular ${positive ? "text-blue" : "text-rose"}`}>
               {positive ? "+" : "−"}${Math.round(animatedChange).toLocaleString()}
             </span>{" "}
-            <span className={`font-mono tabular ${positive ? "text-teal" : "text-rose"}`}>
+            <span className={`font-mono tabular ${positive ? "text-blue" : "text-rose"}`}>
               ({positive ? "+" : ""}{dayChangePct.toFixed(2)}%)
             </span>{" "}
             today.
@@ -634,14 +636,14 @@ function FinanceNarrative({
       className="flex items-start gap-3 rounded-xl border border-border bg-card/40 px-5 py-4"
       data-testid="section-finance-narrative"
     >
-      <LineChart size={14} className={`mt-[3px] shrink-0 ${positive ? "text-teal" : "text-rose"}`} />
+      <LineChart size={14} className={`mt-[3px] shrink-0 ${positive ? "text-blue" : "text-rose"}`} />
       <p className="text-sm text-muted-foreground leading-relaxed">
         {parts.map((p, i) => (
           <span key={i}>{i > 0 && " "}{p}</span>
         ))}
         {" "}
         <Link href="/finance">
-          <span className="text-teal hover:underline underline-offset-2 cursor-pointer font-mono text-xs uppercase tracking-wider">
+          <span className="text-blue hover:underline underline-offset-2 cursor-pointer font-mono text-xs uppercase tracking-wider">
             Full view →
           </span>
         </Link>
@@ -662,7 +664,7 @@ function TodayInCity({
   return (
     <section data-testid="section-today-in-city">
       <div className="flex items-center gap-2 mb-3">
-        <Compass size={13} className="text-teal" />
+        <Compass size={13} className="text-blue" />
         <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
           Today in {city}
         </span>
@@ -671,7 +673,7 @@ function TodayInCity({
         {sight && (
           <Link href="/places">
             <div
-              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-teal/30 transition-colors p-4 cursor-pointer"
+              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-blue/30 transition-colors p-4 cursor-pointer"
               data-testid="today-card-sight"
             >
               <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70 mb-2 flex items-center gap-1">
@@ -685,7 +687,7 @@ function TodayInCity({
         {neighborhood && (
           <Link href="/places">
             <div
-              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-teal/30 transition-colors p-4 cursor-pointer"
+              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-blue/30 transition-colors p-4 cursor-pointer"
               data-testid="today-card-neighborhood"
             >
               <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70 mb-2 flex items-center gap-1">
@@ -699,7 +701,7 @@ function TodayInCity({
         {event && (
           <Link href="/events">
             <div
-              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-teal/30 transition-colors p-4 cursor-pointer"
+              className="group rounded-xl border border-border bg-card/60 hover:bg-card hover:border-blue/30 transition-colors p-4 cursor-pointer"
               data-testid="today-card-event"
             >
               <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70 mb-2 flex items-center gap-1">
