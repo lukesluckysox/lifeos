@@ -12,7 +12,7 @@
  */
 
 import { useRef, useState } from "react";
-import { BrowserMultiFormatReader, NotFoundException } from "@zxing/library";
+import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType, NotFoundException } from "@zxing/library";
 import { Camera, Upload, X, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 
 /* ── IATA BCBP month lookup (Julian day → ISO date) ─────────────── */
@@ -49,18 +49,54 @@ export interface ParsedBoardingPass {
   raw: string;
 }
 
-function parseBCBP(raw: string): ParsedBoardingPass | null {
+/** Extract the BCBP string from various encodings:
+ *  - Direct BCBP string (starts with 'M')
+ *  - URL-wrapped: https://...?bcbp=M1... or https://...#M1...
+ *  - JSON-wrapped: { "bcbp": "M1..." } or { "data": "M1..." }
+ *  - Southwest / airline-specific compact formats
+ */
+function extractBCBP(raw: string): string {
+  const s = raw.trim();
+  // Already a BCBP
+  if (s.startsWith("M")) return s;
+  // URL: extract fragment or query param that looks like BCBP
+  try {
+    const url = new URL(s);
+    const fragment = url.hash.replace("#", "");
+    if (fragment.startsWith("M")) return fragment;
+    for (const [, v] of url.searchParams.entries()) {
+      if (v.startsWith("M") && v.length > 40) return v;
+    }
+    // Path segment that starts with M
+    const pathMatch = url.pathname.match(/\/(M[^/]+)/);
+    if (pathMatch) return pathMatch[1];
+  } catch { /* not a URL */ }
+  // JSON
+  try {
+    const obj = JSON.parse(s);
+    for (const key of ["bcbp", "data", "barcode", "raw", "payload"]) {
+      if (typeof obj[key] === "string" && obj[key].startsWith("M")) return obj[key];
+    }
+  } catch { /* not JSON */ }
+  // Last resort: find first occurrence of 'M1' or 'M2' in the string
+  const mIdx = s.search(/M[1-9]/);
+  if (mIdx !== -1) return s.slice(mIdx);
+  return s;
+}
+
+function parseBCBP(rawInput: string): ParsedBoardingPass | null {
+  const raw = extractBCBP(rawInput);
   // Minimum viable BCBP: must start with 'M' (Mandatory field indicator)
   // Format: M{legCount}{name padded 20}{eTicket padded 7}{origin 3}{dest 3}{airline 3}{flight# padded 5}{julianDay 3}{cabin 1}...
   const s = raw.trim();
   if (!s.startsWith("M")) return null;
 
   try {
-    // Field 11: departure date (Julian, 3 chars) — offset 44
     // Field 4: from (3 chars) — offset 30
     // Field 5: to (3 chars) — offset 33
     // Field 6: operating carrier (3 chars) — offset 36
     // Field 7: flight number (5 chars, right-justified) — offset 39
+    // Field 11: departure date (Julian, 3 chars) — offset 44
     // Field 10: cabin (1 char) — offset 47
 
     const origin = s.slice(30, 33).trim().toUpperCase();
@@ -77,7 +113,7 @@ function parseBCBP(raw: string): ParsedBoardingPass | null {
     // Sanity check — origin/dest must be 3 alpha chars
     if (!/^[A-Z]{3}$/.test(origin) || !/^[A-Z]{3}$/.test(destination)) return null;
 
-    return { origin, destination, airline, flightNumber, departureDate, cabin, raw };
+    return { origin, destination, airline, flightNumber, departureDate, cabin, raw: rawInput };
   } catch {
     return null;
   }
@@ -107,7 +143,7 @@ export function BoardingPassScanner({ onParsed, onClose }: BoardingPassScannerPr
     setPreview(objUrl);
 
     try {
-      // Create an HTMLImageElement from the file
+      // Load image element
       const img = new Image();
       img.src = objUrl;
       await new Promise<void>((resolve, reject) => {
@@ -115,21 +151,26 @@ export function BoardingPassScanner({ onParsed, onClose }: BoardingPassScannerPr
         img.onerror = reject;
       });
 
-      const reader = new BrowserMultiFormatReader();
-      // Draw onto canvas so ZXing can read it
-      const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, 0, 0);
+      // Explicitly hint ZXing to try PDF417, QR, and Aztec — all boarding pass formats
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.PDF_417,
+        BarcodeFormat.QR_CODE,
+        BarcodeFormat.AZTEC,   // used by some transit/boarding passes
+        BarcodeFormat.DATA_MATRIX,
+      ]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
 
-      const result = await reader.decodeFromCanvas(canvas);
+      const reader = new BrowserMultiFormatReader(hints);
+
+      // decodeFromImage works directly on HTMLImageElement — no canvas needed
+      const result = await reader.decodeFromImage(img);
       const raw = result.getText();
 
       const parsed = parseBCBP(raw);
       if (!parsed) {
         setScanState("error");
-        setErrorMsg("Barcode found but couldn't parse boarding pass format. Try a clearer image.");
+        setErrorMsg(`Barcode decoded but couldn't read boarding pass data. Raw: ${raw.slice(0, 60)}…`);
         return;
       }
 
@@ -138,10 +179,10 @@ export function BoardingPassScanner({ onParsed, onClose }: BoardingPassScannerPr
     } catch (e) {
       if (e instanceof NotFoundException) {
         setScanState("error");
-        setErrorMsg("No barcode detected. Make sure the PDF417 barcode is clearly visible and well-lit.");
+        setErrorMsg("No barcode detected. Try a clearer, well-lit photo with the full barcode visible.");
       } else {
         setScanState("error");
-        setErrorMsg("Something went wrong reading the image. Try a different photo.");
+        setErrorMsg("Something went wrong reading the image. Try a different photo or format.");
       }
     }
   }
@@ -248,7 +289,7 @@ export function BoardingPassScanner({ onParsed, onClose }: BoardingPassScannerPr
         {/* Tips */}
         {state === "idle" && (
           <div className="rounded-lg border border-border/50 bg-card/20 px-3 py-2.5 text-[11px] text-muted-foreground leading-relaxed">
-            Point at the <span className="text-foreground font-medium">wide PDF417 barcode</span> on your boarding pass — the long rectangular one, not the square QR code. Works with physical passes or screenshots.
+            Works with <span className="text-foreground font-medium">PDF417</span> (the wide rectangular barcode) and <span className="text-foreground font-medium">QR codes</span>. Works on physical passes, Apple Wallet screenshots, and airline app screenshots.
           </div>
         )}
 
