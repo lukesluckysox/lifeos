@@ -328,6 +328,24 @@ export async function registerRoutes(
     const state = req.query.state as string | undefined;
     const err = req.query.error as string | undefined;
 
+    // "interaction_required" / "login_required" means Google has no active session
+    // in this browser (prompt=none). Re-initiate with prompt=consent so they can sign in.
+    if (err === "interaction_required" || err === "login_required" || err === "account_selection_required") {
+      if (state && pendingStates.has(state)) pendingStates.delete(state);
+      const fallbackState = randomUUID();
+      pendingStates.set(fallbackState, Date.now());
+      const params = new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI ?? `http://127.0.0.1:5000/api/auth/google/callback`,
+        response_type: "code",
+        scope: "openid email profile",
+        state: fallbackState,
+        access_type: "online",
+        prompt: "select_account",
+        include_granted_scopes: "true",
+      });
+      return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+    }
     if (err) return res.status(400).send(`Google authorization denied: ${err}`);
     if (!code) return res.status(400).send("Missing authorization code");
     if (!state || !pendingStates.has(state)) {

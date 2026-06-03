@@ -579,7 +579,7 @@ export class DatabaseStorage implements IStorage {
 
   async createSession(userId: number): Promise<{ id: string; expiresAt: number }> {
     const id = randomUUID();
-    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
+    const expiresAt = Date.now() + 365 * 24 * 60 * 60 * 1000; // 1 year
     db.insert(sessions).values({ id, userId, expiresAt, createdAt: Date.now() }).run();
     return { id, expiresAt };
   }
@@ -590,6 +590,13 @@ export class DatabaseStorage implements IStorage {
     if (session.expiresAt < Date.now()) {
       db.delete(sessions).where(eq(sessions.id, sessionId)).run();
       return null;
+    }
+    // Sliding expiry: if the session will expire in less than 6 months, extend it to 1 year
+    const SIX_MONTHS = 183 * 24 * 60 * 60 * 1000;
+    const ONE_YEAR = 365 * 24 * 60 * 60 * 1000;
+    if (session.expiresAt - Date.now() < SIX_MONTHS) {
+      const newExpiry = Date.now() + ONE_YEAR;
+      db.update(sessions).set({ expiresAt: newExpiry }).where(eq(sessions.id, sessionId)).run();
     }
     const user = db.select().from(users).where(eq(users.id, session.userId)).get();
     return user ?? null;

@@ -48,10 +48,11 @@ export function buildAuthorizeUrl(state: string): string {
     scope: "openid email profile",
     state,
     access_type: "online",
-    // Force the account chooser even if the user is already signed in
-    // with one Google account — helpful when multiple Google accounts
-    // share a browser.
-    prompt: "select_account",
+    // Only prompt if there is genuinely no existing Google session.
+    // Removing "select_account" lets returning users skip the chooser
+    // and stay signed in seamlessly. Users with multiple Google accounts
+    // can still switch via the Settings logout → re-login flow.
+    prompt: "none",
     include_granted_scopes: "true",
   });
   return `${AUTHORIZE_URL}?${params.toString()}`;
