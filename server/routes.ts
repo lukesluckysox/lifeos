@@ -31,7 +31,9 @@ import {
   computeOptimalAllocation,
   CANONICAL_SECTORS,
 } from "./finance/sectors";
-
+import { registerHouseholdRoutes } from "./household-routes";
+   import { registerCashAccountRoutes } from "./cash-accounts-routes";
+   import { registerVisitedPlaceRoutes } from "./visited-places-routes";
 const TMDB_KEY = process.env.TMDB_API_KEY;
 const TM_KEY = process.env.TICKETMASTER_API_KEY;
 
@@ -236,7 +238,10 @@ export async function registerRoutes(
   } catch (e: any) {
     console.warn("[demo] bookmarks seed skipped:", e.message);
   }
-
+// ── Shared view: household, cash accounts, visited places ──────────────
+   registerHouseholdRoutes(app);
+   registerCashAccountRoutes(app);
+   registerVisitedPlaceRoutes(app);
   // ══════════════════════════════════════════════════════════════════════════
   // Auth — Spotify OAuth as login
   // ══════════════════════════════════════════════════════════════════════════
