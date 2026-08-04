@@ -367,6 +367,11 @@ function safeAddColumn(table: string, definition: string) {
 }
 safeAddColumn("users", "google_id TEXT");
 safeAddColumn("users", "onboarding_completed INTEGER DEFAULT 0");
+// Optional label for which brokerage/account a manual holding is tracked
+// under (e.g. "Fidelity", "Robinhood", "Held at home") — powers grouping
+// in Finance.tsx's Allocation section and a pill in the Connected tray.
+// Purely a free-text tag, no live connection behind it.
+safeAddColumn("holdings", "brokerage TEXT");
 // Index can't be on UNIQUE retroactively in SQLite without rebuilding
 // the table, but a partial unique index gives us uniqueness for non-null
 // google_id values, which is what we actually need.

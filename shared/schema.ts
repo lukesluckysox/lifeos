@@ -1,7 +1,6 @@
 import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   username: text("username").notNull().unique(),
@@ -14,15 +13,12 @@ export const users = sqliteTable("users", {
   createdAt: integer("created_at").notNull(),
   onboardingCompleted: integer("onboarding_completed").default(0),
 });
-
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
 }).partial({ password: true });
-
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
-
 /**
  * Sessions — HTTP-only cookie session IDs mapped to users.
  */
@@ -32,9 +28,7 @@ export const sessions = sqliteTable("sessions", {
   expiresAt: integer("expires_at").notNull(), // ms epoch
   createdAt: integer("created_at").notNull(),
 });
-
 export type Session = typeof sessions.$inferSelect;
-
 /**
  * Ratings — user's like / dislike / watchlist signal across all domains.
  */
@@ -48,16 +42,13 @@ export const ratings = sqliteTable("ratings", {
   meta: text("meta"),
   createdAt: integer("created_at").notNull(),
 });
-
 export const insertRatingSchema = createInsertSchema(ratings).omit({
   id: true,
   createdAt: true,
   userId: true,
 });
-
 export type Rating = typeof ratings.$inferSelect;
 export type InsertRating = z.infer<typeof insertRatingSchema>;
-
 /**
  * Holdings — manually entered or imported positions.
  */
@@ -69,18 +60,21 @@ export const holdings = sqliteTable("holdings", {
   name: text("name"),
   quantity: real("quantity").notNull(),
   costBasis: real("cost_basis").notNull(),
+  // Optional free-text label for which brokerage/account this manual
+  // holding is tracked under (e.g. "Fidelity", "Robinhood", "Held at
+  // home") — not a live connection, just a grouping tag set from the
+  // Manual entry form. server/storage.ts's safeAddColumn() handles
+  // adding this to an already-existing table via ALTER TABLE.
+  brokerage: text("brokerage"),
   createdAt: integer("created_at").notNull(),
 });
-
 export const insertHoldingSchema = createInsertSchema(holdings).omit({
   id: true,
   createdAt: true,
   userId: true,
 });
-
 export type Holding = typeof holdings.$inferSelect;
 export type InsertHolding = z.infer<typeof insertHoldingSchema>;
-
 /**
  * Watchlist — symbols the user is tracking but doesn't own.
  */
@@ -93,16 +87,13 @@ export const watchlist = sqliteTable("watchlist", {
   note: text("note"),
   createdAt: integer("created_at").notNull(),
 });
-
 export const insertWatchlistSchema = createInsertSchema(watchlist).omit({
   id: true,
   createdAt: true,
   userId: true,
 });
-
 export type Watchlist = typeof watchlist.$inferSelect;
 export type InsertWatchlist = z.infer<typeof insertWatchlistSchema>;
-
 /**
  * Subscriptions — manually-tracked or auto-detected recurring charges.
  */
@@ -120,7 +111,6 @@ export const subscriptions = sqliteTable("subscriptions", {
 export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({ id: true, createdAt: true, userId: true });
 export type Subscription = typeof subscriptions.$inferSelect;
 export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
-
 /**
  * Food spots — user-saved restaurants / cafes / bars.
  */
@@ -138,7 +128,6 @@ export const foodSpots = sqliteTable("food_spots", {
 export const insertFoodSpotSchema = createInsertSchema(foodSpots).omit({ id: true, createdAt: true, userId: true });
 export type FoodSpot = typeof foodSpots.$inferSelect;
 export type InsertFoodSpot = z.infer<typeof insertFoodSpotSchema>;
-
 /**
  * Rec feedback — 👍 / 👎 on recommendation cards.
  */
@@ -154,7 +143,6 @@ export const recFeedback = sqliteTable("rec_feedback", {
 export const insertRecFeedbackSchema = createInsertSchema(recFeedback).omit({ id: true, createdAt: true, userId: true });
 export type RecFeedback = typeof recFeedback.$inferSelect;
 export type InsertRecFeedback = z.infer<typeof insertRecFeedbackSchema>;
-
 /**
  * User items — generic "add your own" across domains.
  */
@@ -171,7 +159,6 @@ export const userItems = sqliteTable("user_items", {
 export const insertUserItemSchema = createInsertSchema(userItems).omit({ id: true, createdAt: true, userId: true });
 export type UserItem = typeof userItems.$inferSelect;
 export type InsertUserItem = z.infer<typeof insertUserItemSchema>;
-
 /**
  * Secrets — small key/value store for per-user credentials.
  * PK is composite (userId, key).
@@ -182,7 +169,6 @@ export const secrets = sqliteTable("secrets", {
   value: text("value").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
-
 /**
  * Plaid items — connected brokerage/bank accounts via Plaid.
  */
@@ -194,11 +180,9 @@ export const plaidItems = sqliteTable("plaid_items", {
   institutionName: text("institution_name"),
   createdAt: integer("created_at").notNull(),
 });
-
 export const insertPlaidItemSchema = createInsertSchema(plaidItems).omit({ id: true, createdAt: true, userId: true });
 export type PlaidItem = typeof plaidItems.$inferSelect;
 export type InsertPlaidItem = z.infer<typeof insertPlaidItemSchema>;
-
 /**
  * Atlas links — per-Radius-user mapping to an Atlas userId, established via
  * the /connect/radius consent flow on Atlas. One row per Radius user.
@@ -211,5 +195,4 @@ export const atlasLinks = sqliteTable("atlas_links", {
   atlasName: text("atlas_name"),
   connectedAt: integer("connected_at").notNull(),
 });
-
 export type AtlasLink = typeof atlasLinks.$inferSelect;
