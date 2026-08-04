@@ -330,6 +330,20 @@ function FinancePortfolio() {
     mutationFn: async (id: number) => (await apiRequest("DELETE", `/api/holdings/${id}`)).json(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/portfolio"] }),
   });
+  // Retroactively assign/change the brokerage label on a holding that
+  // already existed before this field did (or was added without one).
+  // Relies on PATCH /api/holdings/:id accepting a partial { brokerage }
+  // body — same shape as storage.ts's existing updateHolding(userId, id,
+  // patch: Partial<InsertHolding>), which already supports this field
+  // now that it's in the schema.
+  const updateHoldingBrokerage = useMutation({
+    mutationFn: async ({ id, brokerage }: { id: number; brokerage: string }) =>
+      (await apiRequest("PATCH", `/api/holdings/${id}`, { brokerage: brokerage || null })).json(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/portfolio"] }),
+    onError: (e: any) => toast({ title: "Could not update brokerage", description: e.message, variant: "destructive" }),
+  });
+  const [editingBrokerageId, setEditingBrokerageId] = useState<number | null>(null);
+  const [brokerageDraft, setBrokerageDraft] = useState("");
 
   /* Watchlist */
   const { mode: m, withMode } = useMode();
@@ -645,12 +659,39 @@ function FinancePortfolio() {
                   className="flex items-center gap-3 text-sm py-2 border-t border-border/40"
                 >
                   <div className="font-mono w-16">{h.symbol}</div>
-                  <div className="text-xs text-muted-foreground flex-1 min-w-0 truncate">
-                    {h.name}
-                    {h.brokerage && (
-                      <span className="ml-1.5 text-[10px] text-blue/80 border border-blue/30 rounded px-1 py-[1px] normal-case">
-                        {h.brokerage}
-                      </span>
+                  <div className="text-xs text-muted-foreground flex-1 min-w-0 truncate flex items-center gap-1.5">
+                    <span className="truncate">{h.name}</span>
+                    {editingBrokerageId === h.id ? (
+                      <input
+                        autoFocus
+                        value={brokerageDraft}
+                        onChange={e => setBrokerageDraft(e.target.value)}
+                        onBlur={() => {
+                          updateHoldingBrokerage.mutate({ id: h.id, brokerage: brokerageDraft.trim() });
+                          setEditingBrokerageId(null);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          if (e.key === "Escape") setEditingBrokerageId(null);
+                        }}
+                        placeholder="Brokerage"
+                        data-testid={`input-edit-brokerage-${h.id}`}
+                        className="w-32 h-6 px-1.5 text-[10px] rounded border border-blue/40 bg-background normal-case shrink-0"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setEditingBrokerageId(h.id); setBrokerageDraft(h.brokerage || ""); }}
+                        data-testid={`button-edit-brokerage-${h.id}`}
+                        title={h.brokerage ? "Change brokerage" : "Assign a brokerage"}
+                        className={`shrink-0 text-[10px] rounded px-1 py-[1px] normal-case transition-colors ${
+                          h.brokerage
+                            ? "text-blue/80 border border-blue/30 hover:border-blue/60"
+                            : "text-muted-foreground/50 border border-dashed border-border hover:text-blue hover:border-blue/40"
+                        }`}
+                      >
+                        {h.brokerage || "+ brokerage"}
+                      </button>
                     )}
                   </div>
                   <div className="font-mono tabular text-xs text-muted-foreground w-20 text-right">{h.quantity} @ ${h.costBasis}</div>
