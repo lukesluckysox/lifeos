@@ -7,14 +7,13 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/components/AuthProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import { useAccent, type Accent } from "@/components/AccentProvider";
-
+import { HouseholdSettings } from "@/components/HouseholdSettings";
 interface PlaidItem {
   id: number;
   itemId: string;
   institutionName?: string;
   createdAt: number;
 }
-
 export default function Settings() {
   const { user, logout, loginWithSpotify } = useAuth();
   const { theme, toggle } = useTheme();
@@ -22,23 +21,19 @@ export default function Settings() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
-
   const { data: plaidItems = [], isLoading: plaidLoading } = useQuery<PlaidItem[]>({
     queryKey: ["/api/plaid/items"],
     queryFn: async () => (await apiRequest("GET", "/api/plaid/items")).json(),
     enabled: !!user,
   });
-
   const disconnectPlaid = async (itemId: string) => {
     await apiRequest("DELETE", `/api/plaid/items/${itemId}`);
     await queryClient.invalidateQueries({ queryKey: ["/api/plaid/items"] });
   };
-
   const disconnectSpotify = async () => {
     await apiRequest("POST", "/api/spotify/disconnect");
     window.location.reload();
   };
-
   const exportData = async () => {
     setExporting(true);
     try {
@@ -47,14 +42,13 @@ export default function Settings() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `radius-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `lifeos-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
       setExporting(false);
     }
   };
-
   const deleteAccount = async () => {
     setDeleting(true);
     try {
@@ -64,26 +58,21 @@ export default function Settings() {
       setDeleting(false);
     }
   };
-
   if (!user) return null;
-
   return (
     <div className="animate-fade-in" data-testid="page-settings">
       <section className="pt-2 max-w-2xl">
         <div className="eyebrow mb-4">Settings</div>
         <h1 className="font-display text-[clamp(1.5rem,3.5vw,2.5rem)] leading-[1.05] tracking-tight">
-          Your <span className="text-blue italic">Radius</span>.
+          Your <span className="text-blue italic">LifeOS</span>.
         </h1>
         <p className="mt-3 text-base text-muted-foreground max-w-xl leading-relaxed">
           Manage your account, connected services, and data.
         </p>
       </section>
-
       <div className="hairline my-10" />
-
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-12">
         <div className="space-y-12 min-w-0">
-
       {/* Account */}
       <Section title="Account">
         <Row label="Name" value={user.displayName || "—"} />
@@ -111,7 +100,6 @@ export default function Settings() {
           value={<AccentPicker accent={accent} setAccent={setAccent} />}
         />
       </Section>
-
       {/* Connections */}
       <Section title="Connections">
         {/* Spotify */}
@@ -143,7 +131,6 @@ export default function Settings() {
             </button>
           )}
         </div>
-
         {/* Plaid items */}
         <div className="rounded-lg border border-border bg-card/40 p-4">
           <div className="flex items-center justify-between mb-3">
@@ -187,16 +174,19 @@ export default function Settings() {
           )}
         </div>
       </Section>
-
+      {/* Household — invite/join, per-account Finance visibility, Music/Events
+          sharing toggles. HouseholdSettings.tsx renders its own card-style
+          section wrapper (border + "Household" eyebrow), so it's dropped in
+          directly here rather than nested inside another <Section>. */}
+      <HouseholdSettings />
       {/* Goals */}
       <Section title="Goals">
         <Goals />
       </Section>
-
       {/* Data */}
       <Section title="Your data">
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Radius reads your money, music, and places, but never sells your data and never trains on it. You can take it with you, or delete it all, anytime.
+          LifeOS reads your money, music, and places, but never sells your data and never trains on it. You can take it with you, or delete it all, anytime.
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
           <button
@@ -220,7 +210,6 @@ export default function Settings() {
           </button>
         </div>
       </Section>
-
       {/* Danger zone */}
         <Section title="Danger zone">
         {!confirmingDelete ? (
@@ -269,13 +258,12 @@ export default function Settings() {
         )}
         </Section>
         </div>
-
-        {/* Right rail — About Radius */}
+        {/* Right rail — About LifeOS */}
         <aside className="space-y-8" data-testid="aside-settings-about">
           <div className="rounded-xl border border-border bg-card/40 p-5 space-y-3">
-            <div className="eyebrow">About Radius</div>
+            <div className="eyebrow">About LifeOS</div>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Your money, your music, your places — in one place. Radius pulls signal from the apps you already use and lays it out as one dashboard.
+              Your money, your music, your places — in one place. LifeOS pulls signal from the apps you already use and lays it out as one dashboard.
             </p>
             <Link href="/whats-new">
               <span
@@ -309,7 +297,6 @@ export default function Settings() {
     </div>
   );
 }
-
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="space-y-3">
@@ -318,7 +305,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </section>
   );
 }
-
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 py-2.5 border-b border-border/40 last:border-b-0">
@@ -327,7 +313,6 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
-
 const ACCENTS: { id: Accent; label: string; hsl: string }[] = [
   { id: "blue",   label: "Blue",   hsl: "hsl(212 72% 58%)" },
   { id: "teal",   label: "Teal",   hsl: "hsl(174 44% 48%)" },
@@ -335,7 +320,6 @@ const ACCENTS: { id: Accent; label: string; hsl: string }[] = [
   { id: "violet", label: "Violet", hsl: "hsl(258 52% 60%)" },
   { id: "rose",   label: "Rose",   hsl: "hsl(348 52% 58%)" },
 ];
-
 function AccentPicker({ accent, setAccent }: { accent: Accent; setAccent: (a: Accent) => void }) {
   return (
     <div className="flex items-center gap-1.5" data-testid="accent-picker">
