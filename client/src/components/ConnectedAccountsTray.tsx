@@ -18,6 +18,31 @@ const money = (n: number) =>
   `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 /**
+ * Turns whatever apiRequest() threw into an actionable message. Same
+ * helper pattern as HouseholdScopePill.tsx's describeInviteError and
+ * Places.tsx's describePlaceError — duplicated locally per this
+ * codebase's existing precedent (household-routes.ts's local tmFetch
+ * copy) rather than adding a shared-util cross-file dependency.
+ */
+function describeCashError(e: any): string {
+  const raw = String(e?.message ?? "");
+  if (/<!doctype/i.test(raw) || /^\s*</.test(raw) || /unexpected token/i.test(raw)) {
+    return "The cash-accounts endpoint isn't returning JSON — registerCashAccountRoutes(app) is likely missing from server/routes.ts (the request is falling through to the app's HTML shell instead of hitting a real handler). See INTEGRATION.md / ROUTES_PATCH.txt.";
+  }
+  const colonIdx = raw.indexOf(": ");
+  const status = colonIdx > -1 ? raw.slice(0, colonIdx) : "";
+  const bodyText = colonIdx > -1 ? raw.slice(colonIdx + 2) : raw;
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed?.message) return parsed.message;
+  } catch {}
+  if (status === "404") {
+    return "Cash-accounts endpoint not found (404). registerCashAccountRoutes(app) is likely missing from server/routes.ts — see INTEGRATION.md / ROUTES_PATCH.txt.";
+  }
+  return bodyText || raw || "Couldn't save that account — try again.";
+}
+
+/**
  * Replaces the old read-only "Connected brokerages strip" in Finance.tsx.
  * Same row, same chip styling — brokerage chips are unchanged (still
  * read-only, sourced from Plaid), but now a manual savings/cash account
@@ -72,29 +97,47 @@ export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow
     setSaving(true);
     setError(null);
     try {
-      await apiRequest("POST", "/api/cash-accounts", {
+      const res = await apiRequest("POST", "/api/cash-accounts", {
         name: trimmedName,
         institution: institution.trim() || undefined,
         balance: bal,
         includeInPortfolio,
       });
+      // Same failure mode as the invite link and visited-places bugs:
+      // if registerCashAccountRoutes(app) isn't wired into routes.ts,
+      // this can come back 200 with the app's HTML shell instead of a
+      // real JSON response — the account never actually saves, but a
+      // bare catch here would show nothing more useful than "try
+      // again." Check content-type so that's diagnosable instead.
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error("<!doctype (got an HTML page instead of JSON)");
+      }
       invalidateAll();
       resetForm();
-    } catch {
-      setError("Couldn't save that account — try again.");
+    } catch (e: any) {
+      setError(describeCashError(e));
     } finally {
       setSaving(false);
     }
   };
 
   const toggleInclude = async (acc: CashAccount) => {
-    await apiRequest("PATCH", `/api/cash-accounts/${acc.id}`, { includeInPortfolio: !acc.includeInPortfolio });
-    invalidateAll();
+    try {
+      await apiRequest("PATCH", `/api/cash-accounts/${acc.id}`, { includeInPortfolio: !acc.includeInPortfolio });
+      invalidateAll();
+    } catch (e: any) {
+      setError(describeCashError(e));
+    }
   };
 
   const remove = async (acc: CashAccount) => {
-    await apiRequest("DELETE", `/api/cash-accounts/${acc.id}`);
-    invalidateAll();
+    try {
+      await apiRequest("DELETE", `/api/cash-accounts/${acc.id}`);
+      invalidateAll();
+    } catch (e: any) {
+      setError(describeCashError(e));
+    }
   };
 
   const hasAnything = plaidItems.length > 0 || cashAccounts.length > 0;

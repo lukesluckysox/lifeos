@@ -28,6 +28,30 @@ interface DomainShareSettings {
 }
 
 /**
+ * Turns whatever apiRequest() threw into an actionable message. See the
+ * matching helper in HouseholdScopePill.tsx for the full explanation —
+ * duplicated here rather than shared, same precedent as household-routes.ts's
+ * local tmFetch copy.
+ */
+function describeInviteError(e: any): string {
+  const raw = String(e?.message ?? "");
+  if (/<!doctype/i.test(raw) || /^\s*</.test(raw) || /unexpected token/i.test(raw)) {
+    return "The invite endpoint isn't returning JSON — registerHouseholdRoutes(app) is likely missing from server/routes.ts (the request is falling through to the app's HTML shell instead of hitting a real handler). See INTEGRATION.md.";
+  }
+  const colonIdx = raw.indexOf(": ");
+  const status = colonIdx > -1 ? raw.slice(0, colonIdx) : "";
+  const bodyText = colonIdx > -1 ? raw.slice(colonIdx + 2) : raw;
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed?.message) return parsed.message;
+  } catch {}
+  if (status === "404") {
+    return "Invite endpoint not found (404). registerHouseholdRoutes(app) is likely missing from server/routes.ts — see INTEGRATION.md.";
+  }
+  return bodyText || raw || "Couldn't create an invite link.";
+}
+
+/**
  * Household section for the Settings page: invite/leave a household,
  * and per-account visibility toggles that decide what a partner sees in
  * the combined Shared net worth. Drop <HouseholdSettings /> in wherever
@@ -86,21 +110,23 @@ export function HouseholdSettings() {
     setInviteError(null);
     try {
       const res = await apiRequest("POST", "/api/household/invite");
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`;
-        try { detail = (await res.json())?.message || detail; } catch {}
-        throw new Error(detail);
+      // apiRequest already throws for any non-2xx before returning
+      // (see @/lib/queryClient — it reads res.text(), not res.json()).
+      // Reaching here means res.ok, but that doesn't guarantee a JSON
+      // body: an unregistered route can fall through to the app's SPA
+      // fallback and come back 200 with index.html. Check content-type
+      // before parsing so that shows up as an actionable message
+      // instead of a raw "Unexpected token '<'" SyntaxError.
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error("<!doctype (got an HTML page instead of JSON)");
       }
       const data = await res.json();
       if (!data.url) throw new Error("Server didn't return an invite link.");
       setInviteUrl(data.url);
     } catch (e: any) {
       setInviteUrl(null);
-      setInviteError(
-        /^HTTP 404/.test(e?.message || "")
-          ? "Invite endpoint not found (404). registerHouseholdRoutes(app) is likely missing from server/routes.ts — see INTEGRATION.md."
-          : e?.message || "Couldn't create an invite link."
-      );
+      setInviteError(describeInviteError(e));
     } finally {
       setInviteLoading(false);
     }

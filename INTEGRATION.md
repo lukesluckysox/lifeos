@@ -1,3 +1,33 @@
+## Review pass — bugs found and fixed
+
+Did a full self-review of every file in this folder against each other
+(schema columns vs. the SQL that reads/writes them, client types vs.
+server response shapes, route registration completeness). Four things
+were wrong; all four are already fixed in the files here:
+
+1. **`server/storage.ts` — `flight_legs` table was missing columns its
+   own methods used.** The `CREATE TABLE` had `date`/`seat_class`, but
+   `addFlightLeg`/`listFlightLegs` read/write `origin_name`,
+   `destination_name`, `departure_date`, `cabin` — a genuine mismatch
+   from an earlier reconstruction of this file. Fixed to match. Since
+   `CREATE TABLE IF NOT EXISTS` is a no-op against your already-existing
+   table, this only would have bitten a brand-new/empty database — but
+   it's corrected now regardless.
+2. **`client/src/pages/JoinHousehold.tsx` had stale copy** claiming the
+   invite screen shares "Music, Places, Events, and Watch" — leftover
+   from before you narrowed sharing to just Music and Events. Fixed to
+   describe what's actually built.
+3. **`client/src/components/ScopeProvider.tsx` fired an authenticated
+   `/api/household` request even on the pre-login Landing page**
+   (guaranteed 401, silently swallowed, but wasted). Now gated on
+   `useAuth()`'s `user` so it only fires once someone's signed in.
+4. **`client/src/pages/Places.tsx` had lost all indentation** in an
+   earlier rebuild — functionally fine (JS/TS doesn't care), but sloppy
+   and would look broken in a diff against your real file. Reformatted;
+   logic is byte-for-byte the same. The 10 harmless `dedupeByPrimaryName`
+   type-narrowing errors noted below are unchanged and still unrelated
+   to any of my edits — verified again after reformatting.
+
 # Shared View — integration guide
 
 This folder mirrors `lifeos`'s real paths. Drop each file into your clone at

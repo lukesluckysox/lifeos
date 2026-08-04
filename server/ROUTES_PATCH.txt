@@ -1,0 +1,96 @@
+ROUTES.TS PATCH — 3 EDITS, ALL BY HAND IN GITHUB'S WEB EDITOR
+================================================================
+Your real server/routes.ts is ~148KB. I can't safely generate a full
+replacement file for it, so here are the exact lines to add/change and
+exactly where. Three edits total. None of them touch anything else in
+the file.
+
+
+EDIT 1 — add three imports
+---------------------------
+Find the last import statement in the file — it's this block, ending
+in "./finance/sectors":
+
+    import {
+      SECTOR_UNIVERSE as SECTOR_UNIVERSE_SHARED,
+      SYMBOL_TO_SECTOR_CURATED as SYMBOL_TO_SECTOR_CURATED_SHARED,
+      ETF_SECTOR_HINTS as ETF_SECTOR_HINTS_SHARED,
+      isCryptoSymbol,
+      normalizeYahooSector as normalizeYahooSectorShared,
+      yahooSymbol as yahooSymbolShared,
+      computeOptimalAllocation,
+      CANONICAL_SECTORS,
+    } from "./finance/sectors";
+
+Immediately AFTER that closing `} from "./finance/sectors";` line, add
+these 3 new lines:
+
+    import { registerHouseholdRoutes } from "./household-routes";
+    import { registerCashAccountRoutes } from "./cash-accounts-routes";
+    import { registerVisitedPlaceRoutes } from "./visited-places-routes";
+
+
+EDIT 2 — register the three route modules
+-------------------------------------------
+Still in server/routes.ts, inside the `registerRoutes()` function body,
+find this comment block (marks the start of the Spotify auth routes,
+shortly after the demo-seed try/catch blocks):
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Auth — Spotify OAuth as login
+    // ══════════════════════════════════════════════════════════════════════════
+
+Immediately ABOVE it (same 2-space indentation — it's inside the
+function body), add these 4 lines:
+
+      // ── Shared view: household, cash accounts, visited places ──────────────
+      registerHouseholdRoutes(app);
+      registerCashAccountRoutes(app);
+      registerVisitedPlaceRoutes(app);
+
+
+EDIT 3 — export the two price helper functions (THIS IS WHAT BROKE THE BUILD)
+--------------------------------------------------------------------------------
+Your Railway build log error:
+
+    No matching export in "server/routes.ts" for import "fetchStockPrices"
+    No matching export in "server/routes.ts" for import "fetchCryptoPrices"
+
+Cause: household-routes.ts imports these two functions, but in
+routes.ts they're declared without `export`. Scroll to the very bottom
+of the file, under this comment:
+
+    /* ============ Price helpers ============ */
+
+You'll see two function declarations that currently start like this:
+
+    async function fetchStockPrices(symbols: string[]): Promise<Record<string, { price: number; dayChangePct: number; ... }>> {
+
+    async function fetchCryptoPrices(symbols: string[]): ... {
+
+Add the word `export` immediately before `async` on BOTH of them, so
+they read:
+
+    export async function fetchStockPrices(symbols: string[]): Promise<Record<string, { price: number; dayChangePct: number; ... }>> {
+
+    export async function fetchCryptoPrices(symbols: string[]): ... {
+
+Do not change anything else about either function — just add the one
+word `export` at the start of each declaration line.
+
+
+THAT'S IT — 3 edits, ~7 lines added/changed total
+----------------------------------------------------
+Save, commit, redeploy. Once all three are in:
+  - Edit 3 fixes the current build failure (nothing is live until this
+    is in — the whole deploy is currently failing, not just the
+    household stuff).
+  - Edits 1 + 2 turn on the invite link, shared net worth, savings
+    accounts counting toward your total, and the visited-places map —
+    all three were failing silently because these routes were never
+    reachable; requests were falling through to the app's SPA shell
+    (200 OK with an HTML page) instead of hitting real handlers.
+
+Editing tip in GitHub's web editor: use Ctrl/Cmd+F in the file view to
+jump straight to "./finance/sectors", "Spotify OAuth as login", and
+"Price helpers" — you don't need to scroll to find any of these.

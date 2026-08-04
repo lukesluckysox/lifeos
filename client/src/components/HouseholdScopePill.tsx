@@ -5,6 +5,33 @@ import { useScope } from "./ScopeProvider";
 import { apiRequest } from "@/lib/queryClient";
 
 /**
+ * Turns whatever apiRequest() threw into an actionable message.
+ * apiRequest's non-2xx errors carry `${status}: ${rawBodyText}` (see
+ * @/lib/queryClient's throwIfResNotOk — it uses res.text(), not
+ * res.json()). A 200-with-HTML-body case (unregistered route falling
+ * through to the SPA shell) is thrown separately above with a
+ * recognizable "<!doctype" message. Handle both here so the popover
+ * never shows a raw "Unexpected token '<'" JSON parse error again.
+ */
+function describeInviteError(e: any): string {
+  const raw = String(e?.message ?? "");
+  if (/<!doctype/i.test(raw) || /^\s*</.test(raw) || /unexpected token/i.test(raw)) {
+    return "The invite endpoint isn't returning JSON — registerHouseholdRoutes(app) is likely missing from server/routes.ts (the request is falling through to the app's HTML shell instead of hitting a real handler). See INTEGRATION.md.";
+  }
+  const colonIdx = raw.indexOf(": ");
+  const status = colonIdx > -1 ? raw.slice(0, colonIdx) : "";
+  const bodyText = colonIdx > -1 ? raw.slice(colonIdx + 2) : raw;
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed?.message) return parsed.message;
+  } catch {}
+  if (status === "404") {
+    return "Invite endpoint not found (404). registerHouseholdRoutes(app) is likely missing from server/routes.ts — see INTEGRATION.md.";
+  }
+  return bodyText || raw || "Couldn't create an invite link.";
+}
+
+/**
  * Header pill: "Me / Shared" once the user is in a household, or an
  * "Invite partner" affordance if they aren't yet. Drop into AppShell's
  * top utility bar, next to the existing Live/Demo mode pill — same
@@ -35,25 +62,28 @@ export function HouseholdScopePill() {
       setInviteError(null);
       try {
         const res = await apiRequest("POST", "/api/household/invite");
-        // Don't assume 2xx — if the route isn't registered yet
-        // (registerHouseholdRoutes(app) missing from routes.ts), this
-        // 404s with an HTML body and res.json() below would throw an
-        // unhelpful "Unexpected token <" instead of telling you why.
-        if (!res.ok) {
-          let detail = `HTTP ${res.status}`;
-          try { detail = (await res.json())?.message || detail; } catch {}
-          throw new Error(detail);
+        // apiRequest (see @/lib/queryClient) already throws for any
+        // non-2xx response before returning — with message
+        // `${status}: ${bodyText}`, using the RAW response text, not
+        // parsed JSON. So reaching this line means res.ok is true.
+        // BUT that doesn't guarantee a JSON body: if this route isn't
+        // registered (registerHouseholdRoutes(app) missing from
+        // routes.ts) and the app's SPA fallback serves index.html for
+        // any unmatched path with a 200 status instead of a real 404,
+        // apiRequest won't throw at all — and a bare res.json() call
+        // blows up with a raw "Unexpected token '<' ... is not valid
+        // JSON" SyntaxError. Check content-type first so that turns
+        // into an actionable message instead.
+        const contentType = res.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          throw new Error("<!doctype (got an HTML page instead of JSON)");
         }
         const data = await res.json();
         if (!data.url) throw new Error("Server didn't return an invite link.");
         setInviteUrl(data.url);
       } catch (e: any) {
         setInviteUrl(null);
-        setInviteError(
-          e?.message?.includes("404") || /^HTTP 404/.test(e?.message || "")
-            ? "Invite endpoint not found (404). registerHouseholdRoutes(app) is likely missing from server/routes.ts — see INTEGRATION.md."
-            : e?.message || "Couldn't create an invite link."
-        );
+        setInviteError(describeInviteError(e));
       } finally {
         setInviteLoading(false);
       }

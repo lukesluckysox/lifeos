@@ -51,6 +51,45 @@ interface CashAccount { id: number; name: string; institution: string | null; ba
 
 /* ---------- Shared portfolio hook ---------- */
 
+/**
+ * Plaid returns one holding row PER LINKED ACCOUNT, not per security —
+ * if the same ticker sits in two connected brokerages (or the same
+ * manual symbol got added twice), it shows up as separate rows with
+ * the same symbol. Merge same-symbol rows within each source (Plaid
+ * duplicates merge with Plaid duplicates, manual with manual — a
+ * Plaid AAPL and a manually-tracked AAPL stay in their own groups,
+ * since those really are two different things) before display: sum
+ * value, value-weight the two percentage fields so a $50 holding
+ * doesn't skew a $5,000 one.
+ */
+function mergeAllocRowsBySymbol<
+  T extends { symbol: string; name: string; value: number; dayChangePct: number; gainPct: number; source: "plaid" | "manual" }
+>(rows: T[]): T[] {
+  const bySymbol = new Map<string, T>();
+  for (const row of rows) {
+    const key = `${row.source}:${row.symbol}`;
+    const existing = bySymbol.get(key);
+    if (!existing) {
+      bySymbol.set(key, { ...row });
+      continue;
+    }
+    const totalValue = existing.value + row.value;
+    const weightedDayChangePct = totalValue > 0
+      ? (existing.dayChangePct * existing.value + row.dayChangePct * row.value) / totalValue
+      : 0;
+    const weightedGainPct = totalValue > 0
+      ? (existing.gainPct * existing.value + row.gainPct * row.value) / totalValue
+      : 0;
+    bySymbol.set(key, {
+      ...existing,
+      value: totalValue,
+      dayChangePct: weightedDayChangePct,
+      gainPct: weightedGainPct,
+    });
+  }
+  return Array.from(bySymbol.values());
+}
+
 function usePortfolio() {
   const { mode, withMode } = useMode();
   const { data: portfolio } = useQuery<PortfolioResp>({
@@ -110,7 +149,7 @@ function usePortfolio() {
     ? ((blendedKnownValue - blendedKnownCost) / blendedKnownCost) * 100
     : 0;
 
-  const allocRows = [
+  const allocRows = mergeAllocRowsBySymbol([
     ...plaidHoldings.map(h => ({ symbol: h.ticker, name: h.name, value: h.value, dayChangePct: h.dayChangePct, gainPct: h.gainPct, source: "plaid" as const })),
     ...manualHoldings.map(h => ({
       symbol: h.symbol,
@@ -120,7 +159,7 @@ function usePortfolio() {
       gainPct: h.quantity * h.costBasis > 0 ? ((h.value - h.quantity * h.costBasis) / (h.quantity * h.costBasis)) * 100 : 0,
       source: "manual" as const,
     })),
-  ]
+  ])
     .sort((a, b) => b.value - a.value)
     .slice(0, 12)
     .map(r => ({ ...r, weight: netWorth > 0 ? (r.value / netWorth) * 100 : 0 }));
@@ -328,41 +367,33 @@ function FinancePortfolio() {
           ) : (
             <>
               <AllocationBar rows={allocRows} />
-              <div className="mt-6 space-y-1.5">
-                {allocRows.map(r => (
-                  <div
-                    key={`${r.source}-${r.symbol}`}
-                    data-testid={`row-holding-${r.symbol}`}
-                    className="flex items-center gap-4 text-sm py-2 border-b border-border/40 last:border-0"
-                  >
-                    <div className="font-mono text-foreground font-medium w-16">{r.symbol}</div>
-                    <div className="flex-1 min-w-0 text-xs text-muted-foreground truncate">{r.name}</div>
-                    <div className="font-mono tabular text-muted-foreground w-14 text-right">{fixed(r.weight, 1)}%</div>
-                    {/* 7-day sparkline */}
-                    <div className="hidden md:flex items-center">
-                      <HoldingSparkline
-                        points={chartData?.[r.symbol] ?? []}
-                        positive={safePct(r.dayChangePct) >= 0}
-                      />
+              {/* Nested by source rather than one flat merged list — Plaid
+                  and manually-entered holdings each get their own labeled
+                  group with a subtotal weight, so it's clear at a glance
+                  which is which. The bar above still shows the combined
+                  picture; this just breaks the itemized rows apart. The
+                  separate "Manual entry" section further down (the add
+                  form + its own list) is unrelated and untouched. */}
+              {(["plaid", "manual"] as const).map(source => {
+                const rows = allocRows.filter(r => r.source === source);
+                if (rows.length === 0) return null;
+                const subtotalWeight = rows.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
+                return (
+                  <div key={source} className="mt-6" data-testid={`allocation-group-${source}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        {source === "plaid" ? "Plaid" : "Manual"}
+                      </span>
+                      <span className="font-mono text-[10px] tabular text-muted-foreground">{fixed(subtotalWeight, 1)}% of total</span>
                     </div>
-                    <div className="hidden sm:flex flex-col items-end w-20">
-                      <div className={`font-mono tabular text-[11px] ${safePct(r.dayChangePct) >= 0 ? "text-teal" : "text-rose"}`}>
-                        {signedFixed(r.dayChangePct)}
-                      </div>
-                      <div className="font-mono text-[9px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">today</div>
-                    </div>
-                    <div className="flex flex-col items-end w-20">
-                      <div className={`font-mono tabular text-[11px] ${safePct(r.gainPct) >= 0 ? "text-teal" : "text-rose"}`}>
-                        {signedFixed(r.gainPct)}
-                      </div>
-                      <div className="font-mono text-[9px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">overall</div>
-                    </div>
-                    <div className="font-mono tabular w-24 text-right text-foreground">
-                      ${(Number.isFinite(r.value) ? r.value : 0).toLocaleString(undefined,{maximumFractionDigits:0})}
+                    <div className="space-y-1.5">
+                      {rows.map(r => (
+                        <AllocationRow key={`${r.source}-${r.symbol}`} row={r} sparkline={chartData?.[r.symbol] ?? []} />
+                      ))}
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </>
           )}
         </div>
@@ -781,6 +812,65 @@ function Metric({ label, value, sub }: { label: string; value: string; sub: stri
       <div className="eyebrow mb-1.5">{label}</div>
       <div className="font-display text-2xl tabular leading-none">{value}</div>
       <div className="font-mono text-[10px] text-muted-foreground mt-1 uppercase tracking-wider">{sub}</div>
+    </div>
+  );
+}
+
+type AllocRow = {
+  symbol: string;
+  name: string;
+  value: number;
+  dayChangePct: number;
+  gainPct: number;
+  source: "plaid" | "manual";
+  weight: number;
+};
+
+/** One itemized holding row — extracted so the Plaid/Manual nested
+ * groups in FinancePortfolio's Allocation section can both render it
+ * without duplicating the markup. */
+function AllocationRow({ row: r, sparkline }: { row: AllocRow; sparkline: { t: number; p: number }[] }) {
+  return (
+    <div
+      data-testid={`row-holding-${r.symbol}`}
+      className="flex items-center gap-4 text-sm py-2 border-b border-border/40 last:border-0"
+    >
+      <div className="font-mono text-foreground font-medium w-16 flex items-center gap-1">
+        {r.symbol}
+        {r.source === "manual" && (
+          <span
+            title="Manually added holding"
+            data-testid={`badge-manual-${r.symbol}`}
+            className="text-[8px] leading-none font-sans font-semibold text-blue border border-blue/40 rounded px-[3px] py-[1px]"
+          >
+            M
+          </span>
+        )}
+      </div>
+      <div className="flex-1 min-w-0 text-xs text-muted-foreground truncate">{r.name}</div>
+      <div className="font-mono tabular text-muted-foreground w-14 text-right">{fixed(r.weight, 1)}%</div>
+      {/* 7-day sparkline */}
+      <div className="hidden md:flex items-center">
+        <HoldingSparkline
+          points={sparkline}
+          positive={safePct(r.dayChangePct) >= 0}
+        />
+      </div>
+      <div className="hidden sm:flex flex-col items-end w-20">
+        <div className={`font-mono tabular text-[11px] ${safePct(r.dayChangePct) >= 0 ? "text-teal" : "text-rose"}`}>
+          {signedFixed(r.dayChangePct)}
+        </div>
+        <div className="font-mono text-[9px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">today</div>
+      </div>
+      <div className="flex flex-col items-end w-20">
+        <div className={`font-mono tabular text-[11px] ${safePct(r.gainPct) >= 0 ? "text-teal" : "text-rose"}`}>
+          {signedFixed(r.gainPct)}
+        </div>
+        <div className="font-mono text-[9px] text-muted-foreground/70 uppercase tracking-wider mt-0.5">overall</div>
+      </div>
+      <div className="font-mono tabular w-24 text-right text-foreground">
+        ${(Number.isFinite(r.value) ? r.value : 0).toLocaleString(undefined,{maximumFractionDigits:0})}
+      </div>
     </div>
   );
 }

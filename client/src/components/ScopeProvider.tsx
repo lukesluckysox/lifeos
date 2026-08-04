@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/components/AuthProvider";
 
 export type Scope = "me" | "shared";
 
@@ -32,7 +33,12 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   // Session-only — always starts "me" on every page load, same convention as ModeProvider.
   const [scope, setScope] = useState<Scope>("me");
   const [household, setHousehold] = useState<Household | null>(null);
-  const [householdLoading, setHouseholdLoading] = useState(true);
+  // Starts false, not true: with no signed-in user there's nothing to
+  // load, and HouseholdScopePill treats householdLoading=true as "render
+  // nothing yet" — leaving this true pre-auth would just hide the pill
+  // forever on the Landing page's few authed-adjacent states.
+  const [householdLoading, setHouseholdLoading] = useState(false);
+  const { user } = useAuth();
 
   const refetchHousehold = useCallback(async () => {
     try {
@@ -47,8 +53,17 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // /api/household requires auth — skip the round trip entirely
+    // (and the guaranteed 401) while nobody's signed in, e.g. on the
+    // pre-auth Landing page that ScopeProvider also wraps.
+    if (!user) {
+      setHousehold(null);
+      setHouseholdLoading(false);
+      return;
+    }
+    setHouseholdLoading(true);
     refetchHousehold();
-  }, [refetchHousehold]);
+  }, [user, refetchHousehold]);
 
   const toggle = () => setScope(s => (s === "me" ? "shared" : "me"));
 
