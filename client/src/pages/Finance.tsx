@@ -258,7 +258,15 @@ function FinancePortfolio() {
   const cashBarRow = cashValue > 0 && netWorth > 0
     ? { symbol: "CASH", weight: (cashValue / netWorth) * 100, isCash: true as const }
     : null;
-  const barRows = showCashInBar && cashBarRow ? [...allocRows, cashBarRow] : allocRows;
+  // With cash showing, segments weight against the full net worth so the
+  // bar reflects the whole portfolio (stocks + cash). With cash toggled
+  // off, re-normalize against just the stock/crypto total instead of
+  // leaving a gap where cash's slice used to be — "off" resets the bar
+  // to a clean 100%-stocks view, not a partial one.
+  const stockTotal = allocRows.reduce((s, r) => s + (Number.isFinite(r.value) ? r.value : 0), 0);
+  const barRows = showCashInBar && cashBarRow
+    ? [...allocRows, cashBarRow]
+    : allocRows.map(r => ({ ...r, weight: stockTotal > 0 ? (r.value / stockTotal) * 100 : 0 }));
 
   /* 7-day sparklines for each holding */
   const holdingSymbols = useMemo(() => allocRows.map(r => r.symbol), [allocRows]);
