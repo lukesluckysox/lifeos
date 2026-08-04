@@ -6,12 +6,13 @@ import { useTheme } from "./ThemeProvider";
 import { useMode } from "./ModeProvider";
 import { useQuietMode, QUIET_DOMAIN_LABELS, type QuietDomain } from "./QuietModeProvider";
 import { useLocation as useCity } from "./LocationProvider";
+import { HouseholdScopePill } from "./HouseholdScopePill";
 import { Input } from "@/components/ui/input";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
 /* ─────────────────────────────────────────────────────────────────────── */
-/* CitySearch — real geocoded city autocomplete                           */
+/* CitySearch — real geocoded city autocomplete */
 /* ─────────────────────────────────────────────────────────────────────── */
 
 interface CityHit {
@@ -145,7 +146,7 @@ function CitySearch({
           className="mt-2 rounded border border-border/60 bg-card/30 px-2.5 py-2 text-[11px] text-muted-foreground"
           data-testid="text-city-no-results"
         >
-          No matches. Press Enter to use “{q.trim()}” anyway.
+          No matches. Press Enter to use "{q.trim()}" anyway.
         </div>
       )}
 
@@ -300,7 +301,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60 hover:text-blue transition-colors cursor-pointer"
                   data-testid="link-whats-new-hint"
                 >
-                  what’s new
+                  what's new
                 </span>
               </Link>
             </div>
@@ -336,7 +337,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     data-testid="button-location"
                     onClick={() => { setCityDraft(city); setLocOpen(o => !o); }}
                     aria-label="Change city"
-                    title={`Location \u2014 used across Food, Concerts, and Places. Currently: ${city}`}
+                    title={`Location — used across Food, Concerts, and Places. Currently: ${city}`}
                     className="h-8 inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 hover:bg-accent px-3 transition-colors"
                   >
                     <MapPin size={12} className="text-blue" />
@@ -365,13 +366,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     </>
                   )}
                 </div>
+                {/* Me / Shared household scope pill */}
+                <HouseholdScopePill />
                 {/* Live / Demo pill toggle */}
                 <button
                   data-testid="button-mode-toggle"
                   onClick={handleModeToggle}
                   aria-label={`Switch to ${mode === "live" ? "demo" : "live"} mode`}
                   className="group h-8 inline-flex items-center rounded-full border border-border bg-secondary/40 hover:bg-accent transition-colors p-0.5 font-mono text-[10px] uppercase tracking-wider"
-                  title={mode === "live" ? "Showing your real data. Click to switch to sample data." : "Showing sample data \u2014 safe to share. Click to switch back to your data."}
+                  title={mode === "live" ? "Showing your real data. Click to switch to sample data." : "Showing sample data — safe to share. Click to switch back to your data."}
                 >
                   <span className={`px-2.5 py-1 rounded-full transition-colors ${mode === "live" ? "bg-blue text-white" : "text-muted-foreground"}`}>
                     <span className="flex items-center gap-1.5">
@@ -389,7 +392,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     data-testid="button-quiet-mode"
                     onClick={() => setQuietOpen(o => !o)}
                     aria-label="Quiet mode"
-                    title={muted.size > 0 ? `${muted.size} muted on home` : "Quiet mode \u2014 mute domains on home"}
+                    title={muted.size > 0 ? `${muted.size} muted on home` : "Quiet mode — mute domains on home"}
                     className={`h-8 w-8 grid place-items-center rounded-md border transition-colors ${muted.size > 0 ? "border-gold text-gold bg-gold/10" : "border-border hover:bg-accent"}`}
                   >
                     {muted.size > 0 ? <BellOff size={14} /> : <Bell size={14} />}
@@ -460,5 +463,3 @@ export function AppShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
-
-

@@ -20,11 +20,11 @@ import { eq, and, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 // Resolve DB path:
-//  - Production (Railway): point DB_PATH at a persistent volume
-//    (e.g. DB_PATH=/data/data.db with a volume mounted at /data).
-//    Without this, EVERY redeploy wipes data.db — sessions, manual
-//    holdings, Plaid item references, watchlist, all gone.
-//  - Local dev: defaults to ./data.db in the working directory.
+// - Production (Railway): point DB_PATH at a persistent volume
+//   (e.g. DB_PATH=/data/data.db with a volume mounted at /data).
+//   Without this, EVERY redeploy wipes data.db — sessions, manual
+//   holdings, Plaid item references, watchlist, all gone.
+// - Local dev: defaults to ./data.db in the working directory.
 const DB_PATH = process.env.DB_PATH || "data.db";
 try { mkdirSync(dirname(DB_PATH), { recursive: true }); } catch {}
 const sqlite = new Database(DB_PATH);
@@ -66,183 +66,233 @@ function tableExists(name: string): boolean {
 
 // Full schema bootstrap
 sqlite.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password TEXT,
-    spotify_id TEXT UNIQUE,
-    google_id TEXT UNIQUE,
-    email TEXT,
-    display_name TEXT,
-    avatar_url TEXT,
-    created_at INTEGER NOT NULL DEFAULT 0
-  );
-  CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    expires_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-  CREATE TABLE IF NOT EXISTS ratings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    external_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    signal INTEGER NOT NULL,
-    meta TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_ratings_kind_external ON ratings(kind, external_id);
-  CREATE INDEX IF NOT EXISTS idx_ratings_user ON ratings(user_id);
-  CREATE TABLE IF NOT EXISTS holdings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    name TEXT,
-    quantity REAL NOT NULL,
-    cost_basis REAL NOT NULL,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_holdings_kind ON holdings(kind);
-  CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id);
-  CREATE TABLE IF NOT EXISTS watchlist (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    name TEXT,
-    note TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_watchlist_kind ON watchlist(kind);
-  CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id);
-  CREATE TABLE IF NOT EXISTS subscriptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    amount REAL NOT NULL,
-    cadence TEXT NOT NULL,
-    category TEXT,
-    source TEXT NOT NULL DEFAULT 'manual',
-    next_charge TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source);
-  CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
-  CREATE TABLE IF NOT EXISTS food_spots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    city TEXT NOT NULL,
-    category TEXT,
-    note TEXT,
-    url TEXT,
-    source TEXT NOT NULL DEFAULT 'manual',
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_food_spots_city ON food_spots(city);
-  CREATE INDEX IF NOT EXISTS idx_food_spots_source ON food_spots(source);
-  CREATE INDEX IF NOT EXISTS idx_food_spots_user ON food_spots(user_id);
-  CREATE TABLE IF NOT EXISTS rec_feedback (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    external_id TEXT NOT NULL,
-    signal INTEGER NOT NULL,
-    reason TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_rec_feedback_kind_ext ON rec_feedback(kind, external_id);
-  CREATE INDEX IF NOT EXISTS idx_rec_feedback_user ON rec_feedback(user_id);
-  CREATE TABLE IF NOT EXISTS user_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    subtitle TEXT,
-    url TEXT,
-    meta TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_user_items_kind ON user_items(kind);
-  CREATE INDEX IF NOT EXISTS idx_user_items_user ON user_items(user_id);
-  CREATE TABLE IF NOT EXISTS secrets (
-    user_id INTEGER NOT NULL,
-    key TEXT NOT NULL,
-    value TEXT NOT NULL,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (user_id, key)
-  );
-  CREATE TABLE IF NOT EXISTS plaid_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    item_id TEXT NOT NULL,
-    access_token TEXT NOT NULL,
-    institution_name TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_plaid_items_user ON plaid_items(user_id);
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  password TEXT,
+  spotify_id TEXT UNIQUE,
+  google_id TEXT UNIQUE,
+  email TEXT,
+  display_name TEXT,
+  avatar_url TEXT,
+  created_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS ratings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  signal INTEGER NOT NULL,
+  meta TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ratings_kind_external ON ratings(kind, external_id);
+CREATE INDEX IF NOT EXISTS idx_ratings_user ON ratings(user_id);
+CREATE TABLE IF NOT EXISTS holdings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  name TEXT,
+  quantity REAL NOT NULL,
+  cost_basis REAL NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_holdings_kind ON holdings(kind);
+CREATE INDEX IF NOT EXISTS idx_holdings_user ON holdings(user_id);
+CREATE TABLE IF NOT EXISTS watchlist (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  name TEXT,
+  note TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_kind ON watchlist(kind);
+CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id);
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  amount REAL NOT NULL,
+  cadence TEXT NOT NULL,
+  category TEXT,
+  source TEXT NOT NULL DEFAULT 'manual',
+  next_charge TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
+CREATE TABLE IF NOT EXISTS food_spots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  city TEXT NOT NULL,
+  category TEXT,
+  note TEXT,
+  url TEXT,
+  source TEXT NOT NULL DEFAULT 'manual',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_food_spots_city ON food_spots(city);
+CREATE INDEX IF NOT EXISTS idx_food_spots_source ON food_spots(source);
+CREATE INDEX IF NOT EXISTS idx_food_spots_user ON food_spots(user_id);
+CREATE TABLE IF NOT EXISTS rec_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  signal INTEGER NOT NULL,
+  reason TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rec_feedback_kind_ext ON rec_feedback(kind, external_id);
+CREATE INDEX IF NOT EXISTS idx_rec_feedback_user ON rec_feedback(user_id);
+CREATE TABLE IF NOT EXISTS user_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  subtitle TEXT,
+  url TEXT,
+  meta TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_items_kind ON user_items(kind);
+CREATE INDEX IF NOT EXISTS idx_user_items_user ON user_items(user_id);
+CREATE TABLE IF NOT EXISTS secrets (
+  user_id INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
+CREATE TABLE IF NOT EXISTS plaid_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  item_id TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  institution_name TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plaid_items_user ON plaid_items(user_id);
 
-  CREATE TABLE IF NOT EXISTS user_cards (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    card_id TEXT NOT NULL,
-    nickname TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id);
-  CREATE TABLE IF NOT EXISTS flight_legs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    origin TEXT NOT NULL,
-    destination TEXT NOT NULL,
-    airline TEXT,
-    flight_number TEXT,
-    date TEXT NOT NULL,
-    miles INTEGER,
-    seat_class TEXT,
-    notes TEXT,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_flight_legs_user ON flight_legs(user_id);
-  CREATE TABLE IF NOT EXISTS net_worth_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    label TEXT NOT NULL,
-    value REAL NOT NULL,
-    notes TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_nw_user ON net_worth_entries(user_id);
-  CREATE TABLE IF NOT EXISTS goals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    category TEXT NOT NULL,
-    target REAL NOT NULL,
-    current REAL NOT NULL DEFAULT 0,
-    unit TEXT NOT NULL,
-    deadline TEXT,
-    notes TEXT,
-    completed INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
+CREATE TABLE IF NOT EXISTS user_cards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  card_id TEXT NOT NULL,
+  nickname TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_cards_user ON user_cards(user_id);
+CREATE TABLE IF NOT EXISTS flight_legs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  origin TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  airline TEXT,
+  flight_number TEXT,
+  date TEXT NOT NULL,
+  miles INTEGER,
+  seat_class TEXT,
+  notes TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_flight_legs_user ON flight_legs(user_id);
+CREATE TABLE IF NOT EXISTS net_worth_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  value REAL NOT NULL,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nw_user ON net_worth_entries(user_id);
+CREATE TABLE IF NOT EXISTS goals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL,
+  target REAL NOT NULL,
+  current REAL NOT NULL DEFAULT 0,
+  unit TEXT NOT NULL,
+  deadline TEXT,
+  notes TEXT,
+  completed INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
 
-  CREATE TABLE IF NOT EXISTS atlas_links (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL UNIQUE,
-    atlas_user_id TEXT NOT NULL,
-    atlas_username TEXT,
-    atlas_name TEXT,
-    connected_at INTEGER NOT NULL
-  );
+CREATE TABLE IF NOT EXISTS atlas_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE,
+  atlas_user_id TEXT NOT NULL,
+  atlas_username TEXT,
+  atlas_name TEXT,
+  connected_at INTEGER NOT NULL
+);
+
+-- ── Household — shared-view infrastructure for couples ──────────────────
+-- A household is a small group (v1: designed for two) whose members can
+-- opt into a combined "Shared" view of their data. Joining a household is
+-- all-or-nothing for the non-finance domains (Music/Places/Events/Watch);
+-- Finance gets its own per-account visibility layer below because the
+-- stakes of accidentally exposing a balance are higher than a watchlist.
+CREATE TABLE IF NOT EXISTS households (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+-- user_id is UNIQUE: one household per user in v1 (matches the couple
+-- use case). Relax this later if households need to support more than
+-- one group per person.
+CREATE TABLE IF NOT EXISTS household_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  household_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL UNIQUE,
+  joined_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_household_members_household ON household_members(household_id);
+CREATE TABLE IF NOT EXISTS household_invites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  household_id INTEGER NOT NULL,
+  code TEXT NOT NULL UNIQUE,
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  used_by INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_household_invites_code ON household_invites(code);
+-- Per-account, per-owner visibility flag for the Finance domain only.
+-- account_type is "plaid_item" (account_ref = plaid_items.item_id) or
+-- "manual" (account_ref is always the literal "manual" — the whole
+-- hand-entered holdings bucket toggles as one unit in v1). Absence of a
+-- row means NOT visible — sharing is opt-in, not opt-out.
+CREATE TABLE IF NOT EXISTS account_visibility (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  household_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  account_type TEXT NOT NULL,
+  account_ref TEXT NOT NULL,
+  visible INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(household_id, user_id, account_type, account_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_account_visibility_household ON account_visibility(household_id);
 `);
 
 // Forward-compat: CREATE TABLE IF NOT EXISTS doesn't add columns to an
@@ -447,9 +497,9 @@ export class DatabaseStorage implements IStorage {
         airline, flight_number, departure_date, cabin, miles, notes, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(userId, leg.origin.toUpperCase(), leg.destination.toUpperCase(),
-        leg.originName ?? null, leg.destinationName ?? null,
-        leg.airline ?? null, leg.flightNumber ?? null, leg.departureDate,
-        leg.cabin ?? null, leg.miles ?? null, leg.notes ?? null, now);
+      leg.originName ?? null, leg.destinationName ?? null,
+      leg.airline ?? null, leg.flightNumber ?? null, leg.departureDate,
+      leg.cabin ?? null, leg.miles ?? null, leg.notes ?? null, now);
     return { id: result.lastInsertRowid, ...leg, userId, createdAt: now };
   }
   async removeFlightLeg(userId: number, id: number): Promise<{ changes: number }> {
@@ -496,7 +546,7 @@ export class DatabaseStorage implements IStorage {
       INSERT INTO goals (user_id, title, category, target_value, current_value, unit, deadline, notes, completed, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     `).run(userId, goal.title, goal.category, goal.targetValue, goal.currentValue ?? 0,
-        goal.unit, goal.deadline ?? null, goal.notes ?? null, now, now);
+      goal.unit, goal.deadline ?? null, goal.notes ?? null, now, now);
     return { id: result.lastInsertRowid, ...goal, userId, completed: 0, createdAt: now, updatedAt: now };
   }
   async updateGoal(userId: number, id: number, patch: {
@@ -511,9 +561,9 @@ export class DatabaseStorage implements IStorage {
       UPDATE goals SET title=?, category=?, target_value=?, current_value=?, unit=?,
         deadline=?, notes=?, completed=?, updated_at=? WHERE id=? AND user_id=?
     `).run(merged.title, merged.category, merged.target_value ?? patch.targetValue ?? existing.target_value,
-        merged.current_value ?? patch.currentValue ?? existing.current_value,
-        merged.unit, merged.deadline ?? null, merged.notes ?? null,
-        merged.completed ?? 0, now, id, userId);
+      merged.current_value ?? patch.currentValue ?? existing.current_value,
+      merged.unit, merged.deadline ?? null, merged.notes ?? null,
+      merged.completed ?? 0, now, id, userId);
     return { ...merged, id };
   }
   async removeGoal(userId: number, id: number): Promise<{ changes: number }> {
@@ -534,6 +584,9 @@ export class DatabaseStorage implements IStorage {
     db.delete(recFeedback).where(eq(recFeedback.userId, userId)).run();
     db.delete(userItems).where(eq(userItems.userId, userId)).run();
     db.delete(secrets).where(eq(secrets.userId, userId)).run();
+    // Household membership shouldn't outlive the account either.
+    sqlite.prepare("DELETE FROM household_members WHERE user_id = ?").run(userId);
+    sqlite.prepare("DELETE FROM account_visibility WHERE user_id = ?").run(userId);
     const r = db.delete(users).where(eq(users.id, userId)).run();
     return { changes: r.changes };
   }
@@ -762,6 +815,87 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteAtlasLink(userId: number): Promise<{ changes: number }> {
     return db.delete(atlasLinks).where(eq(atlasLinks.userId, userId)).run();
+  }
+
+  // ── Households ────────────────────────────────────────────────────────────
+  async getHouseholdForUser(userId: number): Promise<{ id: number; name: string | null; createdBy: number; createdAt: number } | undefined> {
+    const member = sqlite.prepare("SELECT household_id FROM household_members WHERE user_id = ?").get(userId) as any;
+    if (!member) return undefined;
+    const row = sqlite.prepare("SELECT * FROM households WHERE id = ?").get(member.household_id) as any;
+    if (!row) return undefined;
+    return { id: row.id, name: row.name, createdBy: row.created_by, createdAt: row.created_at };
+  }
+
+  async getHouseholdMemberIds(householdId: number): Promise<number[]> {
+    const rows = sqlite.prepare("SELECT user_id FROM household_members WHERE household_id = ?").all(householdId) as any[];
+    return rows.map(r => r.user_id);
+  }
+
+  async createHousehold(userId: number, name?: string): Promise<{ id: number; name: string | null; createdBy: number; createdAt: number }> {
+    const now = Date.now();
+    const result = sqlite.prepare(
+      "INSERT INTO households (name, created_by, created_at) VALUES (?, ?, ?)"
+    ).run(name ?? null, userId, now);
+    const householdId = Number(result.lastInsertRowid);
+    sqlite.prepare(
+      "INSERT INTO household_members (household_id, user_id, joined_at) VALUES (?, ?, ?)"
+    ).run(householdId, userId, now);
+    return { id: householdId, name: name ?? null, createdBy: userId, createdAt: now };
+  }
+
+  async addHouseholdMember(householdId: number, userId: number): Promise<void> {
+    sqlite.prepare(
+      "INSERT INTO household_members (household_id, user_id, joined_at) VALUES (?, ?, ?)"
+    ).run(householdId, userId, Date.now());
+  }
+
+  async removeHouseholdMember(userId: number): Promise<{ changes: number }> {
+    const result = sqlite.prepare("DELETE FROM household_members WHERE user_id = ?").run(userId);
+    return { changes: result.changes };
+  }
+
+  async createHouseholdInvite(householdId: number, createdBy: number, code: string, ttlMs: number): Promise<{ householdId: number; code: string; createdBy: number; createdAt: number; expiresAt: number }> {
+    const now = Date.now();
+    const expiresAt = now + ttlMs;
+    sqlite.prepare(`
+      INSERT INTO household_invites (household_id, code, created_by, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(householdId, code, createdBy, now, expiresAt);
+    return { householdId, code, createdBy, createdAt: now, expiresAt };
+  }
+
+  async getActiveInviteForHousehold(householdId: number): Promise<any> {
+    return sqlite.prepare(`
+      SELECT * FROM household_invites
+      WHERE household_id = ? AND used_at IS NULL AND expires_at > ?
+      ORDER BY created_at DESC LIMIT 1
+    `).get(householdId, Date.now());
+  }
+
+  async getInviteByCode(code: string): Promise<any> {
+    return sqlite.prepare("SELECT * FROM household_invites WHERE code = ?").get(code);
+  }
+
+  async markInviteUsed(code: string, usedBy: number): Promise<void> {
+    sqlite.prepare("UPDATE household_invites SET used_at = ?, used_by = ? WHERE code = ?").run(Date.now(), usedBy, code);
+  }
+
+  // ── Account visibility (household-scoped Finance sharing) ─────────────────
+  async getAccountVisibility(householdId: number, ownerUserId: number): Promise<Array<{ accountType: string; accountRef: string; visible: boolean }>> {
+    const rows = sqlite.prepare(
+      "SELECT account_type, account_ref, visible FROM account_visibility WHERE household_id = ? AND user_id = ?"
+    ).all(householdId, ownerUserId) as any[];
+    return rows.map(r => ({ accountType: r.account_type, accountRef: r.account_ref, visible: !!r.visible }));
+  }
+
+  async setAccountVisibility(householdId: number, ownerUserId: number, accountType: string, accountRef: string, visible: boolean): Promise<void> {
+    const now = Date.now();
+    sqlite.prepare(`
+      INSERT INTO account_visibility (household_id, user_id, account_type, account_ref, visible, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(household_id, user_id, account_type, account_ref)
+      DO UPDATE SET visible = excluded.visible, updated_at = excluded.updated_at
+    `).run(householdId, ownerUserId, accountType, accountRef, visible ? 1 : 0, now);
   }
 }
 

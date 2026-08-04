@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AccentProvider } from "@/components/AccentProvider";
 import { ModeProvider } from "@/components/ModeProvider";
+import { ScopeProvider } from "@/components/ScopeProvider";
 import { QuietModeProvider } from "@/components/QuietModeProvider";
 import { LocationProvider } from "@/components/LocationProvider";
 import { AuthProvider, useAuth } from "@/components/AuthProvider";
@@ -21,6 +22,7 @@ import Saved from "@/pages/Saved";
 import WhatsNew from "@/pages/WhatsNew";
 import Settings from "@/pages/Settings";
 import Landing from "@/pages/Landing";
+import JoinHousehold from "@/pages/JoinHousehold";
 import NotFound from "@/pages/not-found";
 import { useEffect } from "react";
 import { Logo } from "@/components/Logo";
@@ -72,6 +74,10 @@ function AppRouter() {
         <Route path="/saved"><ErrorBoundary label="Saved page"><Saved /></ErrorBoundary></Route>
         <Route path="/whats-new"><ErrorBoundary label="What's New page"><WhatsNew /></ErrorBoundary></Route>
         <Route path="/settings"><ErrorBoundary label="Settings page"><Settings /></ErrorBoundary></Route>
+        {/* Shared-view household invite acceptance */}
+        <Route path="/join-household/:code">
+          {(params) => <ErrorBoundary label="Join household page"><JoinHousehold code={params.code} /></ErrorBoundary>}
+        </Route>
         {/* Legacy redirects */}
         <Route path="/film">{() => <Redirect to="/watch?tab=film" />}</Route>
         <Route path="/food">{() => <Redirect to="/places?tab=food" />}</Route>
@@ -126,18 +132,20 @@ function App() {
       <AuthProvider>
         <ThemeProvider>
           <AccentProvider>
-          <ModeProvider>
-            <QuietModeProvider>
-              <LocationProvider>
-                <TooltipProvider>
-                  <Toaster />
-                  <Router hook={useHashLocationWithQuery}>
-                    <AppRouter />
-                  </Router>
-                </TooltipProvider>
-              </LocationProvider>
-            </QuietModeProvider>
-          </ModeProvider>
+            <ModeProvider>
+              <ScopeProvider>
+                <QuietModeProvider>
+                  <LocationProvider>
+                    <TooltipProvider>
+                      <Toaster />
+                      <Router hook={useHashLocationWithQuery}>
+                        <AppRouter />
+                      </Router>
+                    </TooltipProvider>
+                  </LocationProvider>
+                </QuietModeProvider>
+              </ScopeProvider>
+            </ModeProvider>
           </AccentProvider>
         </ThemeProvider>
       </AuthProvider>
