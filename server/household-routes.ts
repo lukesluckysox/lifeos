@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { storage } from "./storage";
 import { requireAuth } from "./auth";
 import * as Plaid from "./plaid";
+import * as Spotify from "./spotify";
 import {
   getHouseholdView,
   createOrReuseInvite,
@@ -18,6 +19,30 @@ import {
 // assumed below (returns a map of symbol -> { price, dayChangePct, name }),
 // adjust the manual-holdings block in /api/household/net-worth accordingly.
 import { fetchStockPrices, fetchCryptoPrices } from "./routes";
+
+// Domains that support the opt-out "individual" sharing toggle under the
+// household-level "parent" Shared switch. Finance is deliberately NOT in
+// this list — it uses the separate opt-in account_visibility model above
+// because the stakes of an accidental balance leak are higher.
+const SHARABLE_DOMAINS = ["music", "events"] as const;
+type SharableDomain = (typeof SHARABLE_DOMAINS)[number];
+
+// Local copy of routes.ts's tmFetch — small enough to duplicate rather
+// than add another cross-file export dependency. Keep in sync if the
+// Ticketmaster query shape changes there.
+async function tmFetch(params: Record<string, string>) {
+  const key = process.env.TICKETMASTER_API_KEY;
+  if (!key) return null;
+  const qs = new URLSearchParams({ apikey: key, ...params }).toString();
+  const url = `https://app.ticketmaster.com/discovery/v2/events.json?${qs}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Household — shared-view infrastructure for couples.
@@ -203,6 +228,21 @@ export function registerHouseholdRoutes(app: Express) {
           }
         }
 
+        // Cash / savings accounts — no price lookup, just the balance the
+        // owner entered. Excluded from the portfolio entirely (owner's
+        // own "include in portfolio" choice) takes priority over sharing;
+        // an account left out of your own total never counts toward the
+        // household's either.
+        const cashAccounts = await storage.listCashAccounts(memberId);
+        for (const acc of cashAccounts as any[]) {
+          if (!acc.includeInPortfolio) continue;
+          const key = `cash_account:${acc.id}`;
+          const ok = isSelf || visibleSet.has(key);
+          if (!ok) { hidden++; continue; }
+          included++;
+          memberValue += Number(acc.balance) || 0;
+        }
+
         combinedValue += memberValue;
         perMember.push({
           userId: memberId,
@@ -219,6 +259,204 @@ export function registerHouseholdRoutes(app: Express) {
         perMember,
         asOf: new Date().toISOString(),
       });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── Domain-level sharing settings (Music, Events) ───────────────────────
+  // Opt-out: a domain is shared unless the owning member explicitly turns
+  // it off. This is the "individual" layer under the household's "parent"
+  // Shared toggle — join the household once, then dial any one domain
+  // back down without leaving.
+  app.get("/api/household/domain-shares", requireAuth, async (req, res) => {
+    try {
+      const household = await storage.getHouseholdForUser(req.user!.id);
+      if (!household) return res.json({ household: null, settings: {} });
+      const raw = await storage.getDomainShareSettings(household.id, req.user!.id);
+      const settings: Record<SharableDomain, boolean> = {} as any;
+      for (const d of SHARABLE_DOMAINS) settings[d] = raw[d] ?? true;
+      res.json({ household: { id: household.id }, settings });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/household/domain-shares", requireAuth, async (req, res) => {
+    try {
+      const { domain, shared } = req.body || {};
+      if (!SHARABLE_DOMAINS.includes(domain)) {
+        return res.status(400).json({ message: `domain must be one of: ${SHARABLE_DOMAINS.join(", ")}` });
+      }
+      const household = await storage.getHouseholdForUser(req.user!.id);
+      if (!household) return res.status(400).json({ message: "You're not in a household yet." });
+      await storage.setDomainShared(household.id, req.user!.id, domain, !!shared);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── Shared Music ─────────────────────────────────────────────────────────
+  // Merges each opted-in household member's own live Spotify pull (each
+  // person authorizes their own Spotify account — there's no such thing
+  // as a "combined" Spotify query) plus their pinned tracks
+  // (user_items, kind="music"). The requester's own listening always
+  // shows regardless of their own toggle; a partner's shows only if
+  // they haven't turned Music sharing off.
+  app.get("/api/household/music", requireAuth, async (req, res) => {
+    try {
+      const household = await storage.getHouseholdForUser(req.user!.id);
+      if (!household) return res.json({ inHousehold: false, tracks: [] });
+
+      const section = (req.query.section as string | undefined) === "top" ? "top" : "recent";
+      const memberIds = await storage.getHouseholdMemberIds(household.id);
+
+      const combined: any[] = [];
+      for (const memberId of memberIds) {
+        const isSelf = memberId === req.user!.id;
+        if (!isSelf) {
+          const shares = await storage.getDomainShareSettings(household.id, memberId);
+          if (!(shares.music ?? true)) continue;
+        }
+        const user = await storage.getUser(memberId);
+        const sharedBy = isSelf ? null : user?.displayName ?? null;
+
+        const st = await Spotify.userStatus(memberId).catch(() => ({ authorized: false } as any));
+        if (st.authorized) {
+          try {
+            const snap: any = section === "top"
+              ? await Spotify.getTopTracks(memberId, "short_term", 15)
+              : await Spotify.getRecentlyPlayed(memberId, 15);
+            for (const t of snap?.tracks || []) {
+              combined.push({ ...t, sharedBy, sharedByUserId: memberId });
+            }
+          } catch {}
+        }
+
+        try {
+          const pinned = await storage.listUserItems(memberId, "music");
+          for (const p of pinned as any[]) {
+            combined.push({
+              id: `user-${p.id}`,
+              name: p.title,
+              artist: p.subtitle || "",
+              url: p.url || undefined,
+              pinned: true,
+              playedAt: new Date(p.createdAt).toISOString(),
+              sharedBy,
+              sharedByUserId: memberId,
+            });
+          }
+        } catch {}
+      }
+
+      combined.sort((a, b) => {
+        if (section === "top") return (b.popularity ?? 0) - (a.popularity ?? 0);
+        return new Date(b.playedAt || 0).getTime() - new Date(a.playedAt || 0).getTime();
+      });
+
+      res.json({ inHousehold: true, source: "household", section, tracks: combined.slice(0, 40) });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── Shared Events ────────────────────────────────────────────────────────
+  // Mirrors /api/concerts-for-you's artist-matching logic, but builds the
+  // artist list from every opted-in household member's Spotify + pinned
+  // artists before querying Ticketmaster, so a show either partner would
+  // like surfaces once instead of requiring each person to check alone.
+  app.get("/api/household/concerts-for-you", requireAuth, async (req, res) => {
+    try {
+      const household = await storage.getHouseholdForUser(req.user!.id);
+      if (!household) return res.json({ inHousehold: false, city: "", concerts: [] });
+
+      const city = (req.query.city as string | undefined)?.trim() || "Honolulu";
+      const memberIds = await storage.getHouseholdMemberIds(household.id);
+
+      const seen = new Set<string>();
+      const artists: string[] = [];
+      const artistOwners = new Map<string, string[]>();
+      const pushArtist = (name: string, ownerName: string | null) => {
+        const primary = (name || "").split(",")[0].trim();
+        if (!primary) return;
+        const key = primary.toLowerCase();
+        if (!seen.has(key)) { seen.add(key); artists.push(primary); }
+        if (ownerName) {
+          const list = artistOwners.get(key) ?? [];
+          if (!list.includes(ownerName)) list.push(ownerName);
+          artistOwners.set(key, list);
+        }
+      };
+
+      for (const memberId of memberIds) {
+        const isSelf = memberId === req.user!.id;
+        if (!isSelf) {
+          const shares = await storage.getDomainShareSettings(household.id, memberId);
+          if (!(shares.events ?? true)) continue;
+        }
+        const user = await storage.getUser(memberId);
+        const ownerName = isSelf ? null : user?.displayName ?? null;
+
+        const st = await Spotify.userStatus(memberId).catch(() => ({ authorized: false } as any));
+        if (st.authorized) {
+          try {
+            const [followed, recent, top] = await Promise.all([
+              Spotify.getFollowedArtists(memberId, 20).catch(() => [] as any[]),
+              Spotify.getRecentlyPlayed(memberId, 20).catch(() => ({ tracks: [] as any[] })),
+              Spotify.getTopTracks(memberId, "short_term", 20).catch(() => ({ tracks: [] as any[] })),
+            ]);
+            for (const a of followed as any[]) pushArtist(a.name, ownerName);
+            for (const t of (recent as any).tracks || []) pushArtist(t.artist, ownerName);
+            for (const t of (top as any).tracks || []) pushArtist(t.artist, ownerName);
+          } catch {}
+        }
+
+        try {
+          const pinnedArtists = await storage.listUserItems(memberId, "artist");
+          for (const p of pinnedArtists as any[]) pushArtist(p.title, ownerName);
+        } catch {}
+      }
+
+      if (artists.length === 0) {
+        return res.json({ inHousehold: true, source: "none", city, concerts: [] });
+      }
+      if (!process.env.TICKETMASTER_API_KEY) {
+        return res.json({ inHousehold: true, source: "unconfigured", city, concerts: [] });
+      }
+
+      const concerts: any[] = [];
+      for (const a of artists.slice(0, 10)) {
+        try {
+          const data = await tmFetch({ size: "3", keyword: a, city, sort: "date,asc" });
+          const events: any[] = data?._embedded?.events ?? [];
+          const owners = artistOwners.get(a.toLowerCase()) ?? [];
+          for (const e of events) {
+            concerts.push({
+              artist: a,
+              name: e.name,
+              venue: e._embedded?.venues?.[0]?.name || "",
+              city: e._embedded?.venues?.[0]?.city?.name || city,
+              date: e.dates?.start?.localDate || "",
+              url: e.url,
+              basedOn: owners.length ? `${a} — also in ${owners.join(" & ")}'s rotation` : a,
+            });
+            if (concerts.length >= 15) break;
+          }
+        } catch {}
+        if (concerts.length >= 15) break;
+      }
+
+      const seenConcerts = new Set<string>();
+      const deduped = concerts.filter((c: any) => {
+        const k = (c.url || `${c.name || ""}|${c.date || ""}|${c.venue || ""}`).toLowerCase();
+        if (seenConcerts.has(k)) return false;
+        seenConcerts.add(k);
+        return true;
+      });
+
+      res.json({ inHousehold: true, source: "ticketmaster", city, concerts: deduped });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

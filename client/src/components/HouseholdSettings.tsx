@@ -10,10 +10,21 @@ interface PlaidItemRow {
   institutionName: string | null;
   createdAt: number;
 }
+interface CashAccountRow {
+  id: number;
+  name: string;
+  institution: string | null;
+  balance: number;
+  includeInPortfolio: boolean;
+}
 interface VisibilitySetting {
   accountType: string;
   accountRef: string;
   visible: boolean;
+}
+interface DomainShareSettings {
+  music: boolean;
+  events: boolean;
 }
 
 /**
@@ -28,6 +39,7 @@ export function HouseholdSettings() {
   const queryClient = useQueryClient();
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const { data: plaidItems = [] } = useQuery<PlaidItemRow[]>({
@@ -35,11 +47,23 @@ export function HouseholdSettings() {
     queryFn: async () => (await apiRequest("GET", "/api/plaid/items")).json(),
   });
 
+  const { data: cashAccounts = [] } = useQuery<CashAccountRow[]>({
+    queryKey: ["/api/cash-accounts"],
+    queryFn: async () => (await apiRequest("GET", "/api/cash-accounts")).json(),
+  });
+
   const { data: visData } = useQuery<{ settings: VisibilitySetting[] }>({
     queryKey: ["/api/household/visibility"],
     queryFn: async () => (await apiRequest("GET", "/api/household/visibility")).json(),
     enabled: !!household,
   });
+
+  const { data: domainData } = useQuery<{ settings: DomainShareSettings }>({
+    queryKey: ["/api/household/domain-shares"],
+    queryFn: async () => (await apiRequest("GET", "/api/household/domain-shares")).json(),
+    enabled: !!household,
+  });
+  const domainSettings: DomainShareSettings = domainData?.settings ?? { music: true, events: true };
 
   const visMap = new Map((visData?.settings ?? []).map(s => [`${s.accountType}:${s.accountRef}`, s.visible]));
   const manualVisible = visMap.get("manual:manual") ?? false;
@@ -50,12 +74,33 @@ export function HouseholdSettings() {
     queryClient.invalidateQueries({ queryKey: ["/api/household/net-worth"] });
   };
 
+  const setDomainShared = async (domain: keyof DomainShareSettings, shared: boolean) => {
+    await apiRequest("POST", "/api/household/domain-shares", { domain, shared });
+    queryClient.invalidateQueries({ queryKey: ["/api/household/domain-shares"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/household/music"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/household/concerts-for-you"] });
+  };
+
   const getInvite = async () => {
     setInviteLoading(true);
+    setInviteError(null);
     try {
       const res = await apiRequest("POST", "/api/household/invite");
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try { detail = (await res.json())?.message || detail; } catch {}
+        throw new Error(detail);
+      }
       const data = await res.json();
-      setInviteUrl(data.url ?? null);
+      if (!data.url) throw new Error("Server didn't return an invite link.");
+      setInviteUrl(data.url);
+    } catch (e: any) {
+      setInviteUrl(null);
+      setInviteError(
+        /^HTTP 404/.test(e?.message || "")
+          ? "Invite endpoint not found (404). registerHouseholdRoutes(app) is likely missing from server/routes.ts — see INTEGRATION.md."
+          : e?.message || "Couldn't create an invite link."
+      );
     } finally {
       setInviteLoading(false);
     }
@@ -86,9 +131,16 @@ export function HouseholdSettings() {
       {!household ? (
         <>
           <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
-            Invite a partner to build a Shared view — a combined Home dashboard across Music, Places, Events, and
-            Watch, plus opt-in Finance sharing.
+            Invite a partner to build a Shared view — combined Music and Events, plus opt-in Finance sharing.
           </p>
+          {inviteError && (
+            <div
+              className="text-[11px] text-rose leading-relaxed mb-2 rounded border border-rose/30 bg-rose/5 px-2.5 py-2"
+              data-testid="text-settings-invite-error"
+            >
+              {inviteError}
+            </div>
+          )}
           {!inviteUrl ? (
             <button
               type="button"
@@ -128,6 +180,42 @@ export function HouseholdSettings() {
               .join(", ") || "1 other person"}
             .
           </div>
+
+          <div className="eyebrow mb-2">Shared with your household</div>
+          <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+            The Shared pill up top is the parent switch — flip it and these merge automatically. Turn any one off
+            here without leaving the household.
+          </p>
+          <ul className="space-y-1.5 mb-5">
+            <li className="flex items-center justify-between gap-3 text-sm rounded-md border border-border/60 px-3 py-2">
+              <span>My Music (recently played, top tracks, pinned tracks)</span>
+              <button
+                type="button"
+                data-testid="button-domain-share-music"
+                onClick={() => setDomainShared("music", !domainSettings.music)}
+                className={`inline-flex items-center gap-1.5 text-xs rounded-full border px-2.5 py-1 transition ${
+                  domainSettings.music ? "border-teal/40 bg-teal/10 text-teal" : "border-border text-muted-foreground"
+                }`}
+              >
+                {domainSettings.music ? <Eye size={12} /> : <EyeOff size={12} />}
+                {domainSettings.music ? "Shared" : "Private"}
+              </button>
+            </li>
+            <li className="flex items-center justify-between gap-3 text-sm rounded-md border border-border/60 px-3 py-2">
+              <span>My Events matches (followed artists, concerts near you)</span>
+              <button
+                type="button"
+                data-testid="button-domain-share-events"
+                onClick={() => setDomainShared("events", !domainSettings.events)}
+                className={`inline-flex items-center gap-1.5 text-xs rounded-full border px-2.5 py-1 transition ${
+                  domainSettings.events ? "border-teal/40 bg-teal/10 text-teal" : "border-border text-muted-foreground"
+                }`}
+              >
+                {domainSettings.events ? <Eye size={12} /> : <EyeOff size={12} />}
+                {domainSettings.events ? "Shared" : "Private"}
+              </button>
+            </li>
+          </ul>
 
           <div className="eyebrow mb-2">Finance accounts visible to your household</div>
           <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
@@ -177,6 +265,29 @@ export function HouseholdSettings() {
                 No connected brokerage accounts yet — connect one on Finance to share it here.
               </li>
             )}
+            {cashAccounts.filter(a => a.includeInPortfolio).map(acc => {
+              const key = `cash_account:${acc.id}`;
+              const visible = visMap.get(key) ?? false;
+              return (
+                <li
+                  key={acc.id}
+                  className="flex items-center justify-between gap-3 text-sm rounded-md border border-border/60 px-3 py-2"
+                >
+                  <span>{acc.name}{acc.institution ? ` · ${acc.institution}` : ""}</span>
+                  <button
+                    type="button"
+                    data-testid={`button-visibility-cash-${acc.id}`}
+                    onClick={() => setVisible("cash_account", String(acc.id), !visible)}
+                    className={`inline-flex items-center gap-1.5 text-xs rounded-full border px-2.5 py-1 transition ${
+                      visible ? "border-blue/40 bg-blue/10 text-blue" : "border-border text-muted-foreground"
+                    }`}
+                  >
+                    {visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                    {visible ? "Shared" : "Private"}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
 
           <button

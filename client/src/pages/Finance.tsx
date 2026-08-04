@@ -1,9 +1,11 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopPickPill } from "@/components/TopPickPill";
-import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, ArrowUpRight, Building2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, ArrowUpRight } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { PlaidConnect } from "@/components/PlaidConnect";
+import { ConnectedAccountsTray } from "@/components/ConnectedAccountsTray";
+import { HouseholdNetWorth } from "@/components/HouseholdNetWorth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useMode } from "@/components/ModeProvider";
 import { useToast } from "@/hooks/use-toast";
@@ -45,6 +47,7 @@ interface MoverItem { symbol: string; name: string; price: number; dayChangePct:
 interface MoversResp { gainers: MoverItem[]; losers: MoverItem[]; asOf: string }
 interface IndexQuoteResp { symbol: string; kind: string; name: string; currentPrice: number; oneYearReturnPct: number; ytdReturnPct: number; series: { t: number; p: number }[] }
 interface PlaidItemRow { id: number; itemId: string; institutionName: string; createdAt: number }
+interface CashAccount { id: number; name: string; institution: string | null; balance: number; includeInPortfolio: boolean; notes: string | null; createdAt: number }
 
 /* ---------- Shared portfolio hook ---------- */
 
@@ -62,14 +65,25 @@ function usePortfolio() {
     enabled: mode !== "demo",
   });
 
+  /* Manual cash/savings accounts — no ticker, no price feed. Only
+     accounts with includeInPortfolio=true count toward net worth. */
+  const { data: cashAccounts = [] } = useQuery<CashAccount[]>({
+    queryKey: ["/api/cash-accounts"],
+    queryFn: async () => (await apiRequest("GET", "/api/cash-accounts")).json(),
+    enabled: mode !== "demo",
+  });
+
   const plaidHoldings = portfolio?.plaid?.holdings ?? [];
   const manualHoldings = portfolio?.manual ?? [];
   const plaidValue = portfolio?.plaid?.totalValue ?? 0;
   const manualValue = manualHoldings.reduce((s, h) => s + h.value, 0);
-  const netWorth = plaidValue + manualValue;
+  const cashValue = cashAccounts.filter(a => a.includeInPortfolio).reduce((s, a) => s + a.balance, 0);
+  const netWorth = plaidValue + manualValue + cashValue;
 
   const plaidDayChange = portfolio?.plaid?.dayChange ?? 0;
   const manualDayChange = manualHoldings.reduce((s, h) => s + (h.value * (h.dayChangePct / 100)), 0);
+  // Cash accounts have no day-change concept (no price feed) — they
+  // don't move the day-change number, only the net-worth total.
   const dayChange = plaidDayChange + manualDayChange;
   const dayChangePct = netWorth > 0 ? (dayChange / (netWorth - dayChange)) * 100 : 0;
 
@@ -121,7 +135,7 @@ function usePortfolio() {
   ];
 
   return {
-    portfolio, plaidItems, plaidHoldings, manualHoldings, plaidValue, manualValue, netWorth,
+    portfolio, plaidItems, plaidHoldings, manualHoldings, plaidValue, manualValue, cashValue, netWorth,
     dayChange, dayChangePct, totalCost, blendedGainPct,
     allocRows, sentimentHoldings, valuedHoldings, mode,
   };
@@ -189,7 +203,7 @@ function FinancePortfolio() {
   const { toast } = useToast();
 
   const {
-    portfolio, plaidItems, manualHoldings, plaidValue, manualValue, netWorth,
+    portfolio, plaidItems, manualHoldings, plaidValue, manualValue, cashValue, netWorth,
     dayChange, dayChangePct, totalCost, blendedGainPct, allocRows,
   } = usePortfolio();
 
@@ -260,27 +274,11 @@ function FinancePortfolio() {
 
   return (
     <div className="space-y-16 animate-fade-in">
-      {/* ============ Connected brokerages strip (real Plaid items) ============ */}
-      {mode !== "demo" && plaidItems && plaidItems.length > 0 && (
-        <div
-          className="flex items-center gap-2 flex-wrap text-xs font-mono uppercase tracking-wider text-muted-foreground -mb-10"
-          data-testid="strip-connected-brokerages"
-        >
-          <Building2 size={12} className="text-teal" />
-          <span className="text-muted-foreground/70">Connected</span>
-          {plaidItems.map((it, idx) => (
-            <span key={it.id} className="flex items-center gap-2">
-              <span
-                className="rounded-full border border-teal/30 bg-teal/5 text-foreground/90 px-2 py-0.5 normal-case tracking-normal"
-                data-testid={`chip-brokerage-${it.id}`}
-              >
-                {it.institutionName}
-              </span>
-              {idx < plaidItems.length - 1 && <span className="text-muted-foreground/40">·</span>}
-            </span>
-          ))}
-        </div>
-      )}
+      {/* ============ Connected accounts strip (Plaid brokerages + manual cash accounts) ============ */}
+      {mode !== "demo" && <ConnectedAccountsTray plaidItems={plaidItems ?? []} />}
+
+      {/* ============ Household combined net worth (Shared scope only) ============ */}
+      <HouseholdNetWorth />
 
       {/* ============ Net worth headline ============ */}
       <section>
@@ -309,6 +307,9 @@ function FinancePortfolio() {
           <div className="flex gap-8">
             <Metric label="Plaid" value={`$${plaidValue.toLocaleString(undefined,{maximumFractionDigits:0})}`} sub={`${portfolio?.plaid?.positions ?? 0} positions`} />
             <Metric label="Manual" value={`$${manualValue.toLocaleString(undefined,{maximumFractionDigits:0})}`} sub={`${manualHoldings.length} entries`} />
+            {cashValue > 0 && (
+              <Metric label="Cash" value={`$${cashValue.toLocaleString(undefined,{maximumFractionDigits:0})}`} sub="savings" />
+            )}
           </div>
         </div>
       </section>

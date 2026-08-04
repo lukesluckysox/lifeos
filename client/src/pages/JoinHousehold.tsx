@@ -77,8 +77,9 @@ export default function JoinHousehold({ code }: { code: string }) {
             {inviterName ? `${inviterName} wants to share Life OS with you.` : "You've been invited to a shared household."}
           </h1>
           <p className="text-sm text-muted-foreground mb-5 leading-relaxed">
-            Shared view combines Music, Places, Events, and Watch between you two automatically. Finance stays private
-            account-by-account — nothing there shows up until each of you turns it on in Settings.
+            Shared view merges Music and Events between you two automatically — either of you can turn a domain off
+            later in Settings without leaving the household. Finance stays private account-by-account — nothing there
+            shows up until each of you turns it on in Settings.
           </p>
           <button
             type="button"

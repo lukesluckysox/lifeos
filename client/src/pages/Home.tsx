@@ -43,6 +43,7 @@ interface InsightsResp { insights: InsightItem[]; totalValue: number; asOf: stri
 interface Neighborhood { name: string; note: string; }
 interface TodayGuide { city: string; sights: Array<{ name: string; note: string; }>; neighborhoods: Neighborhood[]; }
 interface NWEntry { id: number; kind: string; label: string; value: number; }
+interface CashTotalResp { total: number; accountCount: number; }
 
 /* ---------- Page ---------- */
 
@@ -96,23 +97,34 @@ export default function Home() {
     queryFn: async () => (await apiRequest("GET", "/api/net-worth")).json(),
     enabled: !!user,
   });
+  // Manual savings/cash accounts (no ticker, no Plaid) — see
+  // server/cash-accounts-routes.ts. Only the accounts the user opted
+  // into "include in portfolio" are summed here.
+  const { data: cashTotalResp } = useQuery<CashTotalResp>({
+    queryKey: ["/api/cash-accounts/total"],
+    queryFn: async () => (await apiRequest("GET", "/api/cash-accounts/total")).json(),
+    enabled: !!user,
+  });
 
   /* Finance numbers */
   const plaidValue = portfolio?.plaid?.totalValue ?? 0;
   const manualValue = (portfolio?.manual ?? []).reduce((a, m) => a + (m.value || 0), 0);
-  const netWorth = plaidValue + manualValue;
+  const cashValue = cashTotalResp?.total ?? 0;
+  const netWorth = plaidValue + manualValue + cashValue;
   const plaidDayChange = portfolio?.plaid?.dayChange ?? 0;
   const manualDayChange = (portfolio?.manual ?? []).reduce((a, m) => a + (m.value * (m.dayChangePct / 100) || 0), 0);
+  // Cash accounts have no price feed, so they contribute 0 to day change
+  // by definition — a savings balance doesn't move until you edit it.
   const dayChange = plaidDayChange + manualDayChange;
   const dayChangePct = netWorth > 0 ? (dayChange / (netWorth - dayChange)) * 100 : 0;
 
   /* Net worth tracker */
   const NW_ASSET_KINDS = ["asset_investment","asset_cash","asset_property","asset_vehicle","asset_other"];
-  const NW_DEBT_KINDS  = ["debt_mortgage","debt_auto","debt_student","debt_credit","debt_other"];
+  const NW_DEBT_KINDS = ["debt_mortgage","debt_auto","debt_student","debt_credit","debt_other"];
   const nwTotalAssets = nwEntries.filter(e => NW_ASSET_KINDS.includes(e.kind)).reduce((s,e)=>s+e.value,0);
-  const nwTotalDebt   = nwEntries.filter(e => NW_DEBT_KINDS.includes(e.kind)).reduce((s,e)=>s+e.value,0);
-  const nwNetWorth    = nwTotalAssets - nwTotalDebt;
-  const hasNWData     = nwEntries.length > 0;
+  const nwTotalDebt = nwEntries.filter(e => NW_DEBT_KINDS.includes(e.kind)).reduce((s,e)=>s+e.value,0);
+  const nwNetWorth = nwTotalAssets - nwTotalDebt;
+  const hasNWData = nwEntries.length > 0;
 
   /* Finance narrative */
   const topInsight = (insights?.insights ?? [])[0];
@@ -200,45 +212,50 @@ export default function Home() {
 
         {/* ===== Finance ===== */}
         <HomeCardWithPill domain="stock">
-        <DashboardCard
-          href="/finance"
-          icon={<LineChart size={13} className="text-blue" />}
-          eyebrow="Finance"
-          testId="card-home-finance"
-        >
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-1">Net worth · USD</div>
-          <div className="font-display text-2xl leading-none tabular" data-testid="text-home-net-worth">
-            ${netWorth.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-          </div>
-          {netWorth > 0 ? (
-            <>
-              <div className="mt-2 flex items-center gap-2 text-xs">
-                {dayChange >= 0 ? <TrendingUp size={12} className="text-blue" /> : <TrendingDown size={12} className="text-rose" />}
-                <span className={`${dayChange >= 0 ? "text-blue" : "text-rose"} tabular font-mono`}>
-                  {dayChange >= 0 ? "+" : "−"}${Math.abs(dayChange).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                </span>
-                <span className={`tabular font-mono ${dayChange >= 0 ? "text-blue" : "text-rose"}`}>
-                  ({dayChange >= 0 ? "+" : ""}{dayChangePct.toFixed(2)}%)
-                </span>
-                <span className="text-muted-foreground">today</span>
-              </div>
-              {portfolioHistory && portfolioHistory.points.length > 1 && (
-                <div className="mt-4">
-                  <Sparkline points={portfolioHistory.points} positive={(portfolioHistory.sixMonthReturnPct ?? 0) >= 0} />
-                </div>
-              )}
-              <div className="mt-3 grid grid-cols-3 gap-3 pt-3 border-t border-border/40">
-                <Stat label="1d" pct={portfolioHistory?.dayReturnPct} />
-                <Stat label="1m" pct={portfolioHistory?.oneMonthReturnPct} />
-                <Stat label="6m" pct={portfolioHistory?.sixMonthReturnPct} />
-              </div>
-            </>
-          ) : (
-            <div className="mt-3 text-xs text-muted-foreground leading-relaxed">
-              Connect a brokerage or add a holding to track your portfolio.
+          <DashboardCard
+            href="/finance"
+            icon={<LineChart size={13} className="text-blue" />}
+            eyebrow="Finance"
+            testId="card-home-finance"
+          >
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-1">Net worth · USD</div>
+            <div className="font-display text-2xl leading-none tabular" data-testid="text-home-net-worth">
+              ${netWorth.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </div>
-          )}
-        </DashboardCard>
+            {netWorth > 0 ? (
+              <>
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  {dayChange >= 0 ? <TrendingUp size={12} className="text-blue" /> : <TrendingDown size={12} className="text-rose" />}
+                  <span className={`${dayChange >= 0 ? "text-blue" : "text-rose"} tabular font-mono`}>
+                    {dayChange >= 0 ? "+" : "−"}${Math.abs(dayChange).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                  <span className={`tabular font-mono ${dayChange >= 0 ? "text-blue" : "text-rose"}`}>
+                    ({dayChange >= 0 ? "+" : ""}{dayChangePct.toFixed(2)}%)
+                  </span>
+                  <span className="text-muted-foreground">today</span>
+                </div>
+                {cashValue > 0 && (
+                  <div className="mt-1 text-[10px] text-muted-foreground font-mono">
+                    incl. ${cashValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} in savings
+                  </div>
+                )}
+                {portfolioHistory && portfolioHistory.points.length > 1 && (
+                  <div className="mt-4">
+                    <Sparkline points={portfolioHistory.points} positive={(portfolioHistory.sixMonthReturnPct ?? 0) >= 0} />
+                  </div>
+                )}
+                <div className="mt-3 grid grid-cols-3 gap-3 pt-3 border-t border-border/40">
+                  <Stat label="1d" pct={portfolioHistory?.dayReturnPct} />
+                  <Stat label="1m" pct={portfolioHistory?.oneMonthReturnPct} />
+                  <Stat label="6m" pct={portfolioHistory?.sixMonthReturnPct} />
+                </div>
+              </>
+            ) : (
+              <div className="mt-3 text-xs text-muted-foreground leading-relaxed">
+                Connect a brokerage or add a holding to track your portfolio.
+              </div>
+            )}
+          </DashboardCard>
         </HomeCardWithPill>
 
         {/* ===== Net Worth ===== */}
@@ -268,119 +285,119 @@ export default function Home() {
 
         {/* ===== Places ===== */}
         <HomeCardWithPill domain="place">
-        <DashboardCard
-          href="/places"
-          icon={<MapPin size={13} className="text-blue" />}
-          eyebrow={`Places · ${guide?.city ?? city}`}
-          testId="card-home-places"
-        >
-          <div className="text-sm font-semibold text-foreground/80 mb-3">Top sights</div>
-          {topSights.length > 0 ? (
-            <ul className="space-y-2.5">
-              {topSights.map((s, i) => (
-                <li key={`${s.name}-${i}`} className="text-sm leading-snug flex items-start gap-2" data-testid={`item-home-sight-${i}`}>
-                  <span className="mt-1 h-1 w-1 rounded-full bg-blue shrink-0" />
-                  <span className="flex-1 min-w-0">
-                    <span className="font-medium truncate block" title={s.name}>{s.name}</span>
-                    <span className="text-xs text-muted-foreground line-clamp-1">{s.note}</span>
-                  </span>
-                  {s.pinned && (
-                    <span className="font-mono text-[9px] uppercase tracking-wider text-blue border border-blue/30 rounded px-1 py-0.5 shrink-0">
-                      pinned
+          <DashboardCard
+            href="/places"
+            icon={<MapPin size={13} className="text-blue" />}
+            eyebrow={`Places · ${guide?.city ?? city}`}
+            testId="card-home-places"
+          >
+            <div className="text-sm font-semibold text-foreground/80 mb-3">Top sights</div>
+            {topSights.length > 0 ? (
+              <ul className="space-y-2.5">
+                {topSights.map((s, i) => (
+                  <li key={`${s.name}-${i}`} className="text-sm leading-snug flex items-start gap-2" data-testid={`item-home-sight-${i}`}>
+                    <span className="mt-1 h-1 w-1 rounded-full bg-blue shrink-0" />
+                    <span className="flex-1 min-w-0">
+                      <span className="font-medium truncate block" title={s.name}>{s.name}</span>
+                      <span className="text-xs text-muted-foreground line-clamp-1">{s.note}</span>
                     </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyHint>Add a place or change city.</EmptyHint>
-          )}
-        </DashboardCard>
+                    {s.pinned && (
+                      <span className="font-mono text-[9px] uppercase tracking-wider text-blue border border-blue/30 rounded px-1 py-0.5 shrink-0">
+                        pinned
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyHint>Add a place or change city.</EmptyHint>
+            )}
+          </DashboardCard>
         </HomeCardWithPill>
 
         {/* ===== Events ===== */}
         <HomeCardWithPill domain="event">
-        <DashboardCard
-          href="/events"
-          icon={<CalIcon size={13} className="text-blue" />}
-          eyebrow={`Events · ${city}`}
-          testId="card-home-events"
-        >
-          <div className="text-sm font-semibold text-foreground/80 mb-3">Concerts for you</div>
-          {upcomingConcerts.length > 0 ? (
-            <ul className="space-y-2.5">
-              {upcomingConcerts.map((c, i) => (
-                <li key={`${c.artist}-${i}`} className="text-sm leading-snug flex items-baseline gap-3" data-testid={`item-home-concert-${i}`}>
-                  <span className="font-mono text-[10px] tabular text-muted-foreground shrink-0 w-16">{formatDate(c.date)}</span>
-                  <span className="flex-1 min-w-0">
-                    <span className="font-medium truncate block" title={c.artist}>{c.artist}</span>
-                    <span className="text-xs text-muted-foreground truncate block" title={c.venue}>{c.venue}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyHint>No shows yet. Add an artist to follow.</EmptyHint>
-          )}
-        </DashboardCard>
+          <DashboardCard
+            href="/events"
+            icon={<CalIcon size={13} className="text-blue" />}
+            eyebrow={`Events · ${city}`}
+            testId="card-home-events"
+          >
+            <div className="text-sm font-semibold text-foreground/80 mb-3">Concerts for you</div>
+            {upcomingConcerts.length > 0 ? (
+              <ul className="space-y-2.5">
+                {upcomingConcerts.map((c, i) => (
+                  <li key={`${c.artist}-${i}`} className="text-sm leading-snug flex items-baseline gap-3" data-testid={`item-home-concert-${i}`}>
+                    <span className="font-mono text-[10px] tabular text-muted-foreground shrink-0 w-16">{formatDate(c.date)}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="font-medium truncate block" title={c.artist}>{c.artist}</span>
+                      <span className="text-xs text-muted-foreground truncate block" title={c.venue}>{c.venue}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyHint>No shows yet. Add an artist to follow.</EmptyHint>
+            )}
+          </DashboardCard>
         </HomeCardWithPill>
 
         {/* ===== Music ===== */}
         <HomeCardWithPill domain="artist">
-        <DashboardCard
-          href="/music"
-          icon={<MusicIcon size={13} className="text-blue" />}
-          eyebrow="Music · recently played"
-          testId="card-home-music"
-        >
-          {topTracks.length > 0 ? (
-            <div className="grid grid-cols-4 gap-2">
-              {topTracks.map((t) => (
-                <div key={t.id} className="space-y-1.5" data-testid={`item-home-track-${t.id}`}>
-                  <div className="aspect-square rounded-md bg-muted/40 overflow-hidden border border-border/40">
-                    {t.image ? (
-                      <img src={t.image} alt={t.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full grid place-items-center text-[8px] font-mono uppercase tracking-wider text-muted-foreground">no art</div>
-                    )}
+          <DashboardCard
+            href="/music"
+            icon={<MusicIcon size={13} className="text-blue" />}
+            eyebrow="Music · recently played"
+            testId="card-home-music"
+          >
+            {topTracks.length > 0 ? (
+              <div className="grid grid-cols-4 gap-2">
+                {topTracks.map((t) => (
+                  <div key={t.id} className="space-y-1.5" data-testid={`item-home-track-${t.id}`}>
+                    <div className="aspect-square rounded-md bg-muted/40 overflow-hidden border border-border/40">
+                      {t.image ? (
+                        <img src={t.image} alt={t.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full grid place-items-center text-[8px] font-mono uppercase tracking-wider text-muted-foreground">no art</div>
+                      )}
+                    </div>
+                    <div className="text-[11px] leading-tight font-medium truncate" title={t.name}>{t.name}</div>
+                    <div className="text-[10px] text-muted-foreground truncate" title={t.artist}>{t.artist}</div>
                   </div>
-                  <div className="text-[11px] leading-tight font-medium truncate" title={t.name}>{t.name}</div>
-                  <div className="text-[10px] text-muted-foreground truncate" title={t.artist}>{t.artist}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyHint>Connect Spotify for live listening.</EmptyHint>
-          )}
-        </DashboardCard>
+                ))}
+              </div>
+            ) : (
+              <EmptyHint>Connect Spotify for live listening.</EmptyHint>
+            )}
+          </DashboardCard>
         </HomeCardWithPill>
 
         {/* ===== Watch ===== */}
         <HomeCardWithPill domain="show">
-        <DashboardCard
-          href="/watch"
-          icon={<Tv size={13} className="text-blue" />}
-          eyebrow="Watch · for tonight"
-          testId="card-home-watch"
-        >
-          {topWatch.length > 0 ? (
-            <ul className="space-y-2.5">
-              {topWatch.map((it) => (
-                <li key={it.id} className="text-sm leading-snug flex items-baseline gap-3" data-testid={`item-home-watch-${it.id}`}>
-                  <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground shrink-0 w-12">{it.kind} · {it.year || "—"}</span>
-                  <span className="font-medium truncate flex-1" title={it.title}>{it.title}</span>
-                  {it.pinned && (
-                    <span className="font-mono text-[9px] uppercase tracking-wider text-blue border border-blue/30 rounded px-1 py-0.5 shrink-0">
-                      pinned
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyHint>Rate a few titles to seed your taste.</EmptyHint>
-          )}
-        </DashboardCard>
+          <DashboardCard
+            href="/watch"
+            icon={<Tv size={13} className="text-blue" />}
+            eyebrow="Watch · for tonight"
+            testId="card-home-watch"
+          >
+            {topWatch.length > 0 ? (
+              <ul className="space-y-2.5">
+                {topWatch.map((it) => (
+                  <li key={it.id} className="text-sm leading-snug flex items-baseline gap-3" data-testid={`item-home-watch-${it.id}`}>
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground shrink-0 w-12">{it.kind} · {it.year || "—"}</span>
+                    <span className="font-medium truncate flex-1" title={it.title}>{it.title}</span>
+                    {it.pinned && (
+                      <span className="font-mono text-[9px] uppercase tracking-wider text-blue border border-blue/30 rounded px-1 py-0.5 shrink-0">
+                        pinned
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyHint>Rate a few titles to seed your taste.</EmptyHint>
+            )}
+          </DashboardCard>
         </HomeCardWithPill>
 
       </section>
@@ -388,7 +405,7 @@ export default function Home() {
       <div className="hairline" />
       <footer className="pb-12 space-y-3">
         <div className="flex items-baseline gap-3 flex-wrap">
-          <span className="font-display text-xl text-muted-foreground italic">Radius</span>
+          <span className="font-display text-xl text-muted-foreground italic">LifeOS</span>
           <span className="eyebrow">your money, your music, your places</span>
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
@@ -532,7 +549,7 @@ function OnboardingChecklist({
         <div>
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-blue mb-1">Getting started · {pct}%</div>
           <h2 className="font-display text-lg leading-tight">
-            {allCoreDone ? "You’re all set — dismiss this?" : "Connect a few things to make Radius yours."}
+            {allCoreDone ? "You're all set — dismiss this?" : "Connect a few things to make LifeOS yours."}
           </h2>
         </div>
         <button
@@ -612,11 +629,11 @@ function HeroGreeting({
             today.
           </>
         ) : (
-          <>Here’s what’s on your radar today.</>
+          <>Here's what's on your radar today.</>
         )}
         {trackCount > 0 && (
           <>
-            {" "}You’ve played{" "}
+            {" "}You've played{" "}
             <span className="text-foreground tabular">{trackCount}</span>{" "}
             track{trackCount === 1 ? "" : "s"} recently.
           </>

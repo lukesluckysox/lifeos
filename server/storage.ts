@@ -199,11 +199,13 @@ CREATE TABLE IF NOT EXISTS flight_legs (
   user_id INTEGER NOT NULL,
   origin TEXT NOT NULL,
   destination TEXT NOT NULL,
+  origin_name TEXT,
+  destination_name TEXT,
   airline TEXT,
   flight_number TEXT,
-  date TEXT NOT NULL,
+  departure_date TEXT NOT NULL,
+  cabin TEXT,
   miles INTEGER,
-  seat_class TEXT,
   notes TEXT,
   created_at INTEGER NOT NULL
 );
@@ -293,6 +295,62 @@ CREATE TABLE IF NOT EXISTS account_visibility (
   UNIQUE(household_id, user_id, account_type, account_ref)
 );
 CREATE INDEX IF NOT EXISTS idx_account_visibility_household ON account_visibility(household_id);
+-- Per-user, per-domain sharing switch for the LOW-stakes domains (Music,
+-- Events). Unlike account_visibility (Finance, opt-IN — absent row means
+-- hidden), this is opt-OUT: absent row means shared=true. Joining a
+-- household shares Music/Events by default; a member can flip a domain
+-- off here without leaving the household. This is the "individual"
+-- layer underneath the household-level "parent" Shared toggle.
+CREATE TABLE IF NOT EXISTS household_domain_shares (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  household_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  domain TEXT NOT NULL,
+  shared INTEGER NOT NULL DEFAULT 1,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(household_id, user_id, domain)
+);
+CREATE INDEX IF NOT EXISTS idx_household_domain_shares_household ON household_domain_shares(household_id);
+
+-- Manual cash / savings accounts — balances with no ticker and no price
+-- feed (a local credit union account, a brokerage that won't connect via
+-- Plaid, cash under the mattress). Just a name and a balance you update
+-- by hand, with a switch for whether it counts toward the overall
+-- portfolio total. No quantity/cost-basis columns on purpose — this
+-- isn't priced, it's just tracked.
+CREATE TABLE IF NOT EXISTS cash_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  institution TEXT,
+  balance REAL NOT NULL DEFAULT 0,
+  include_in_portfolio INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cash_accounts_user ON cash_accounts(user_id);
+
+-- Visited places — native replacement for the Atlas "Experience"/Path
+-- concept. Same shape PathsMap.tsx already expects (type, name,
+-- location, lat/lon), logged directly in LifeOS instead of fetched via
+-- the Atlas OAuth connect flow. type is freeform text but the known set
+-- rendered with dedicated colors in PathsMap.tsx is: national_park,
+-- state, country, stadium, concert, beach — anything else falls back to
+-- PathsMap's DEFAULT_COLOR.
+CREATE TABLE IF NOT EXISTS visited_places (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  location TEXT,
+  latitude REAL,
+  longitude REAL,
+  visited_date TEXT,
+  note TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_visited_places_user ON visited_places(user_id);
 `);
 
 // Forward-compat: CREATE TABLE IF NOT EXISTS doesn't add columns to an
@@ -587,6 +645,9 @@ export class DatabaseStorage implements IStorage {
     // Household membership shouldn't outlive the account either.
     sqlite.prepare("DELETE FROM household_members WHERE user_id = ?").run(userId);
     sqlite.prepare("DELETE FROM account_visibility WHERE user_id = ?").run(userId);
+    sqlite.prepare("DELETE FROM household_domain_shares WHERE user_id = ?").run(userId);
+    sqlite.prepare("DELETE FROM cash_accounts WHERE user_id = ?").run(userId);
+    sqlite.prepare("DELETE FROM visited_places WHERE user_id = ?").run(userId);
     const r = db.delete(users).where(eq(users.id, userId)).run();
     return { changes: r.changes };
   }
@@ -896,6 +957,150 @@ export class DatabaseStorage implements IStorage {
       ON CONFLICT(household_id, user_id, account_type, account_ref)
       DO UPDATE SET visible = excluded.visible, updated_at = excluded.updated_at
     `).run(householdId, ownerUserId, accountType, accountRef, visible ? 1 : 0, now);
+  }
+
+  // ── Domain-level sharing (Music, Events — opt-out, default shared) ────────
+  async getDomainShareSettings(householdId: number, userId: number): Promise<Record<string, boolean>> {
+    const rows = sqlite.prepare(
+      "SELECT domain, shared FROM household_domain_shares WHERE household_id = ? AND user_id = ?"
+    ).all(householdId, userId) as any[];
+    const map: Record<string, boolean> = {};
+    for (const r of rows) map[r.domain] = !!r.shared;
+    return map;
+  }
+
+  async setDomainShared(householdId: number, userId: number, domain: string, shared: boolean): Promise<void> {
+    const now = Date.now();
+    sqlite.prepare(`
+      INSERT INTO household_domain_shares (household_id, user_id, domain, shared, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(household_id, user_id, domain)
+      DO UPDATE SET shared = excluded.shared, updated_at = excluded.updated_at
+    `).run(householdId, userId, domain, shared ? 1 : 0, now);
+  }
+
+  // ── Cash / savings accounts (manual, no ticker) ────────────────────────────
+  async listCashAccounts(userId: number): Promise<any[]> {
+    const rows = sqlite.prepare(
+      "SELECT * FROM cash_accounts WHERE user_id = ? ORDER BY created_at DESC"
+    ).all(userId) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      userId: r.user_id,
+      name: r.name,
+      institution: r.institution,
+      balance: r.balance,
+      includeInPortfolio: !!r.include_in_portfolio,
+      notes: r.notes,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  async addCashAccount(userId: number, acc: { name: string; institution?: string | null; balance: number; includeInPortfolio?: boolean; notes?: string | null }): Promise<any> {
+    const now = Date.now();
+    const result = sqlite.prepare(`
+      INSERT INTO cash_accounts (user_id, name, institution, balance, include_in_portfolio, notes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, acc.name, acc.institution ?? null, acc.balance, acc.includeInPortfolio === false ? 0 : 1, acc.notes ?? null, now, now);
+    return {
+      id: Number(result.lastInsertRowid),
+      userId,
+      name: acc.name,
+      institution: acc.institution ?? null,
+      balance: acc.balance,
+      includeInPortfolio: acc.includeInPortfolio !== false,
+      notes: acc.notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  async updateCashAccount(userId: number, id: number, patch: { name?: string; institution?: string | null; balance?: number; includeInPortfolio?: boolean; notes?: string | null }): Promise<any> {
+    const now = Date.now();
+    const existing: any = sqlite.prepare("SELECT * FROM cash_accounts WHERE id = ? AND user_id = ?").get(id, userId);
+    if (!existing) return undefined;
+    const name = patch.name ?? existing.name;
+    const institution = patch.institution !== undefined ? patch.institution : existing.institution;
+    const balance = patch.balance !== undefined ? patch.balance : existing.balance;
+    const includeInPortfolio = patch.includeInPortfolio !== undefined ? (patch.includeInPortfolio ? 1 : 0) : existing.include_in_portfolio;
+    const notes = patch.notes !== undefined ? patch.notes : existing.notes;
+    sqlite.prepare(`
+      UPDATE cash_accounts SET name=?, institution=?, balance=?, include_in_portfolio=?, notes=?, updated_at=?
+      WHERE id=? AND user_id=?
+    `).run(name, institution, balance, includeInPortfolio, notes, now, id, userId);
+    return {
+      id, userId, name, institution, balance,
+      includeInPortfolio: !!includeInPortfolio, notes,
+      createdAt: existing.created_at, updatedAt: now,
+    };
+  }
+
+  async removeCashAccount(userId: number, id: number): Promise<{ changes: number }> {
+    const result = sqlite.prepare("DELETE FROM cash_accounts WHERE id = ? AND user_id = ?").run(id, userId);
+    return { changes: result.changes };
+  }
+
+  // ── Visited places (native Path/Experience replacement) ────────────────────
+  async listVisitedPlaces(userId: number): Promise<any[]> {
+    const rows = sqlite.prepare(
+      "SELECT * FROM visited_places WHERE user_id = ? ORDER BY created_at DESC"
+    ).all(userId) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      userId: r.user_id,
+      type: r.type,
+      name: r.name,
+      location: r.location,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      visitedDate: r.visited_date,
+      note: r.note,
+      createdAt: r.created_at,
+    }));
+  }
+
+  async addVisitedPlace(userId: number, p: {
+    type: string; name: string; location?: string | null;
+    latitude?: number | null; longitude?: number | null;
+    visitedDate?: string | null; note?: string | null;
+  }): Promise<any> {
+    const now = Date.now();
+    const result = sqlite.prepare(`
+      INSERT INTO visited_places (user_id, type, name, location, latitude, longitude, visited_date, note, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, p.type, p.name, p.location ?? null, p.latitude ?? null, p.longitude ?? null, p.visitedDate ?? null, p.note ?? null, now);
+    return {
+      id: Number(result.lastInsertRowid), userId, type: p.type, name: p.name,
+      location: p.location ?? null, latitude: p.latitude ?? null, longitude: p.longitude ?? null,
+      visitedDate: p.visitedDate ?? null, note: p.note ?? null, createdAt: now,
+    };
+  }
+
+  async updateVisitedPlace(userId: number, id: number, patch: {
+    type?: string; name?: string; location?: string | null;
+    latitude?: number | null; longitude?: number | null;
+    visitedDate?: string | null; note?: string | null;
+  }): Promise<any> {
+    const existing: any = sqlite.prepare("SELECT * FROM visited_places WHERE id = ? AND user_id = ?").get(id, userId);
+    if (!existing) return undefined;
+    const type = patch.type ?? existing.type;
+    const name = patch.name ?? existing.name;
+    const location = patch.location !== undefined ? patch.location : existing.location;
+    const latitude = patch.latitude !== undefined ? patch.latitude : existing.latitude;
+    const longitude = patch.longitude !== undefined ? patch.longitude : existing.longitude;
+    const visitedDate = patch.visitedDate !== undefined ? patch.visitedDate : existing.visited_date;
+    const note = patch.note !== undefined ? patch.note : existing.note;
+    sqlite.prepare(`
+      UPDATE visited_places SET type=?, name=?, location=?, latitude=?, longitude=?, visited_date=?, note=?
+      WHERE id=? AND user_id=?
+    `).run(type, name, location, latitude, longitude, visitedDate, note, id, userId);
+    return { id, userId, type, name, location, latitude, longitude, visitedDate, note, createdAt: existing.created_at };
+  }
+
+  async removeVisitedPlace(userId: number, id: number): Promise<{ changes: number }> {
+    const result = sqlite.prepare("DELETE FROM visited_places WHERE id = ? AND user_id = ?").run(id, userId);
+    return { changes: result.changes };
   }
 }
 

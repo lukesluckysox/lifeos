@@ -16,6 +16,7 @@ export function HouseholdScopePill() {
   const [open, setOpen] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const inHousehold = !!household;
@@ -31,12 +32,28 @@ export function HouseholdScopePill() {
     setOpen(o => !o);
     if (!inviteUrl && !inviteLoading) {
       setInviteLoading(true);
+      setInviteError(null);
       try {
         const res = await apiRequest("POST", "/api/household/invite");
+        // Don't assume 2xx — if the route isn't registered yet
+        // (registerHouseholdRoutes(app) missing from routes.ts), this
+        // 404s with an HTML body and res.json() below would throw an
+        // unhelpful "Unexpected token <" instead of telling you why.
+        if (!res.ok) {
+          let detail = `HTTP ${res.status}`;
+          try { detail = (await res.json())?.message || detail; } catch {}
+          throw new Error(detail);
+        }
         const data = await res.json();
-        setInviteUrl(data.url ?? null);
-      } catch {
+        if (!data.url) throw new Error("Server didn't return an invite link.");
+        setInviteUrl(data.url);
+      } catch (e: any) {
         setInviteUrl(null);
+        setInviteError(
+          e?.message?.includes("404") || /^HTTP 404/.test(e?.message || "")
+            ? "Invite endpoint not found (404). registerHouseholdRoutes(app) is likely missing from server/routes.ts — see INTEGRATION.md."
+            : e?.message || "Couldn't create an invite link."
+        );
       } finally {
         setInviteLoading(false);
       }
@@ -99,6 +116,11 @@ export function HouseholdScopePill() {
           >
             <div className="eyebrow mb-2">Invite your partner</div>
             {inviteLoading && <div className="text-xs text-muted-foreground">Generating link…</div>}
+            {inviteError && (
+              <div className="text-[11px] text-rose leading-relaxed" data-testid="text-household-invite-error">
+                {inviteError}
+              </div>
+            )}
             {inviteUrl && (
               <>
                 <div
