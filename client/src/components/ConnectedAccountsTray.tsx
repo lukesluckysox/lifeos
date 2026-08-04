@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useScope } from "./ScopeProvider";
-import { Building2, Wallet, Plus, X, Eye, EyeOff, Trash2 } from "lucide-react";
+import { Building2, Wallet, Plus, X, Eye, EyeOff, Trash2, Landmark } from "lucide-react";
 
 interface PlaidItemRow { id: number; itemId: string; institutionName: string; createdAt: number }
 interface CashAccount {
@@ -29,6 +29,9 @@ const ownerLabel = (isSelf: boolean, displayName: string | null) =>
 
 const money = (n: number) =>
   `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+const slugifyForTestId = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "brokerage";
 
 /**
  * Turns whatever apiRequest() threw into an actionable message. Same
@@ -71,7 +74,18 @@ function describeCashError(e: any): string {
  * Renders even with zero brokerages/cash accounts connected — the "+"
  * pill needs to be reachable from an empty state too.
  */
-export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow[] }) {
+export function ConnectedAccountsTray({
+  plaidItems,
+  manualBrokerages = [],
+}: {
+  plaidItems: PlaidItemRow[];
+  /** Distinct brokerage/account labels used across manual (hand-entered)
+   * holdings — e.g. "Fidelity", "Robinhood", "Held at home" — with their
+   * combined value. Not a live connection, just a grouping label set in
+   * the Manual entry form; shown here as its own read-only pill so it's
+   * visible in the same "Connected" row as real Plaid/cash accounts. */
+  manualBrokerages?: { name: string; value: number }[];
+}) {
   const queryClient = useQueryClient();
   const { scope, household } = useScope();
   const [adding, setAdding] = useState(false);
@@ -171,7 +185,7 @@ export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow
     }
   };
 
-  const hasAnything = plaidItems.length > 0 || cashAccounts.length > 0 || partnerPlaid.length > 0 || partnerCash.length > 0;
+  const hasAnything = plaidItems.length > 0 || cashAccounts.length > 0 || partnerPlaid.length > 0 || partnerCash.length > 0 || manualBrokerages.length > 0;
 
   return (
     <div
@@ -201,6 +215,19 @@ export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow
         >
           {row.institutionName}
           <span className="opacity-60"> ({ownerLabel(false, row.ownerDisplayName)})</span>
+        </span>
+      ))}
+
+      {manualBrokerages.map(b => (
+        <span
+          key={`manual-brokerage-${b.name}`}
+          className="inline-flex items-center gap-1.5 rounded-full border border-gold/30 bg-gold/5 text-foreground/90 px-2 py-0.5 normal-case tracking-normal"
+          data-testid={`chip-manual-brokerage-${slugifyForTestId(b.name)}`}
+          title="Manually-tracked holdings grouped under this label — not a live connection."
+        >
+          <Landmark size={10} className="text-gold" />
+          {b.name}
+          <span className="tabular opacity-70">{money(b.value)}</span>
         </span>
       ))}
 

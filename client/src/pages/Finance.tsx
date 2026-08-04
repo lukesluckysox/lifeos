@@ -29,7 +29,7 @@ import { useCountUp } from "@/hooks/useCountUp";
 /* ---------- Types ---------- */
 
 interface PlaidHolding { ticker: string; name: string; value: number; dayChangePct: number; gainPct: number; quantity?: number; price?: number }
-interface ManualHolding { id: number; kind: "stock" | "crypto"; symbol: string; name: string; quantity: number; costBasis: number; price: number; value: number; dayChangePct: number; gainPct: number }
+interface ManualHolding { id: number; kind: "stock" | "crypto"; symbol: string; name: string; quantity: number; costBasis: number; price: number; value: number; dayChangePct: number; gainPct: number; brokerage?: string | null }
 interface PortfolioResp {
   source: string;
   mode: string;
@@ -63,11 +63,15 @@ interface CashAccount { id: number; name: string; institution: string | null; ba
  * doesn't skew a $5,000 one.
  */
 function mergeAllocRowsBySymbol<
-  T extends { symbol: string; name: string; value: number; dayChangePct: number; gainPct: number; source: "plaid" | "manual" }
+  T extends { symbol: string; name: string; value: number; dayChangePct: number; gainPct: number; source: "plaid" | "manual"; brokerage?: string | null }
 >(rows: T[]): T[] {
   const bySymbol = new Map<string, T>();
   for (const row of rows) {
-    const key = `${row.source}:${row.symbol}`;
+    // Manual rows also key on brokerage so the same symbol tracked under
+    // two different brokerages (e.g. NVDA at both Fidelity and Robinhood)
+    // stays split for the by-brokerage grouping below, instead of getting
+    // silently merged into one blended row.
+    const key = row.source === "manual" ? `manual:${row.symbol}:${row.brokerage || ""}` : `${row.source}:${row.symbol}`;
     const existing = bySymbol.get(key);
     if (!existing) {
       bySymbol.set(key, { ...row });
@@ -158,6 +162,7 @@ function usePortfolio() {
       dayChangePct: h.dayChangePct,
       gainPct: h.quantity * h.costBasis > 0 ? ((h.value - h.quantity * h.costBasis) / (h.quantity * h.costBasis)) * 100 : 0,
       source: "manual" as const,
+      brokerage: h.brokerage || null,
     })),
   ])
     .sort((a, b) => b.value - a.value)
@@ -186,6 +191,9 @@ function usePortfolio() {
  * on undefined crashes the entire React tree (blank-screen bug seen
  * after first brokerage connect). Use these helpers EVERYWHERE inside
  * `.map(...)` callbacks. */
+function slugifyBrokerage(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "unassigned";
+}
 function fixed(n: number | null | undefined, digits: number = 2): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return n.toFixed(digits);
@@ -249,6 +257,20 @@ function FinancePortfolio() {
   const topConcentration = allocRows[0];
   const biggestMover = [...allocRows].sort((a, b) => Math.abs(safePct(b.dayChangePct)) - Math.abs(safePct(a.dayChangePct)))[0];
 
+  // Distinct brokerage labels used across manual holdings, with a
+  // per-brokerage value total — surfaced as its own pill in the
+  // Connected-accounts tray up top, same row as Plaid brokerages and
+  // cash accounts, so a manually-tracked "Fidelity" or "Robinhood"
+  // shows up there too even though it's not a live connection.
+  const manualBrokerages = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const h of manualHoldings) {
+      if (!h.brokerage) continue;
+      m.set(h.brokerage, (m.get(h.brokerage) || 0) + (Number.isFinite(h.value) ? h.value : 0));
+    }
+    return Array.from(m, ([name, value]) => ({ name, value }));
+  }, [manualHoldings]);
+
   // The color bar's segments used to only ever be stock/crypto holdings,
   // so once cash started counting toward netWorth the segments stopped
   // summing to 100% — cash's share of the total was invisible. Show it
@@ -280,7 +302,7 @@ function FinancePortfolio() {
   });
 
   /* Manual entry form */
-  const [form, setForm] = useState({ kind: "stock" as "stock" | "crypto", symbol: "", quantity: "", costBasis: "" });
+  const [form, setForm] = useState({ kind: "stock" as "stock" | "crypto", symbol: "", quantity: "", costBasis: "", brokerage: "" });
   const addHolding = useMutation({
     mutationFn: async () => {
       const body = {
@@ -288,13 +310,18 @@ function FinancePortfolio() {
         symbol: form.symbol.toUpperCase().trim(),
         quantity: parseFloat(form.quantity),
         costBasis: parseFloat(form.costBasis),
+        // Optional — which brokerage/account this manual position is
+        // actually held at (e.g. "Fidelity", "Held at home"). Purely a
+        // label for grouping in the Allocation section and the
+        // Connected-accounts tray; doesn't connect to anything live.
+        brokerage: form.brokerage.trim() || undefined,
       };
       return (await apiRequest("POST", "/api/holdings", body)).json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/portfolio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
-      setForm({ kind: "stock", symbol: "", quantity: "", costBasis: "" });
+      setForm({ kind: "stock", symbol: "", quantity: "", costBasis: "", brokerage: "" });
       toast({ title: "Holding added" });
     },
     onError: (e: any) => toast({ title: "Could not add", description: e.message, variant: "destructive" }),
@@ -333,7 +360,7 @@ function FinancePortfolio() {
   return (
     <div className="space-y-16 animate-fade-in">
       {/* ============ Connected accounts strip (Plaid brokerages + manual cash accounts) ============ */}
-      {mode !== "demo" && <ConnectedAccountsTray plaidItems={plaidItems ?? []} />}
+      {mode !== "demo" && <ConnectedAccountsTray plaidItems={plaidItems ?? []} manualBrokerages={manualBrokerages} />}
 
       {/* ============ Household combined net worth (Shared scope only) ============ */}
       <HouseholdNetWorth />
@@ -413,6 +440,24 @@ function FinancePortfolio() {
                 const rows = allocRows.filter(r => r.source === source);
                 if (rows.length === 0) return null;
                 const subtotalWeight = rows.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
+
+                // Manual holdings additionally break down by brokerage —
+                // e.g. "Fidelity", "Robinhood", "Held at home" — so it's
+                // clear which account each hand-entered position actually
+                // sits in, not just that it's manual. Plaid rows don't get
+                // this second level; each Plaid row is already attributed
+                // to its real linked institution via the Connected tray.
+                const brokerageGroups = source === "manual"
+                  ? Array.from(
+                      rows.reduce((m, r) => {
+                        const key = r.brokerage || "Unassigned";
+                        if (!m.has(key)) m.set(key, []);
+                        m.get(key)!.push(r);
+                        return m;
+                      }, new Map<string, AllocRow[]>())
+                    )
+                  : null;
+
                 return (
                   <div key={source} className="mt-6" data-testid={`allocation-group-${source}`}>
                     <div className="flex items-center justify-between mb-2">
@@ -421,11 +466,32 @@ function FinancePortfolio() {
                       </span>
                       <span className="font-mono text-[10px] tabular text-muted-foreground">{fixed(subtotalWeight, 1)}% of total</span>
                     </div>
-                    <div className="space-y-1.5">
-                      {rows.map(r => (
-                        <AllocationRow key={`${r.source}-${r.symbol}`} row={r} sparkline={chartData?.[r.symbol] ?? []} />
-                      ))}
-                    </div>
+                    {brokerageGroups ? (
+                      <div className="space-y-4">
+                        {brokerageGroups.map(([brokerage, brokerageRows]) => {
+                          const brokerageWeight = brokerageRows.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
+                          return (
+                            <div key={brokerage} data-testid={`allocation-brokerage-${slugifyBrokerage(brokerage)}`}>
+                              <div className="flex items-center justify-between mb-1.5 pl-2 border-l-2 border-border/60">
+                                <span className="text-[10px] text-muted-foreground/80 pl-1.5">{brokerage}</span>
+                                <span className="font-mono text-[10px] tabular text-muted-foreground/70">{fixed(brokerageWeight, 1)}%</span>
+                              </div>
+                              <div className="space-y-1.5">
+                                {brokerageRows.map(r => (
+                                  <AllocationRow key={`${r.source}-${brokerage}-${r.symbol}`} row={r} sparkline={chartData?.[r.symbol] ?? []} />
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {rows.map(r => (
+                          <AllocationRow key={`${r.source}-${r.symbol}`} row={r} sparkline={chartData?.[r.symbol] ?? []} />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -559,6 +625,13 @@ function FinancePortfolio() {
               <Plus size={14} /> Add
             </button>
           </div>
+          <input
+            placeholder="Brokerage / account (optional) — e.g. Fidelity, Robinhood, Held at home"
+            value={form.brokerage}
+            onChange={e => setForm({ ...form, brokerage: e.target.value })}
+            className="mt-2 h-9 w-full px-3 rounded-md border border-border bg-background text-sm font-mono"
+            data-testid="input-holding-brokerage"
+          />
           {mode === "demo" && (
             <div className="mt-3 text-xs text-muted-foreground">Manual entries are disabled in demo mode.</div>
           )}
@@ -572,7 +645,14 @@ function FinancePortfolio() {
                   className="flex items-center gap-3 text-sm py-2 border-t border-border/40"
                 >
                   <div className="font-mono w-16">{h.symbol}</div>
-                  <div className="text-xs text-muted-foreground flex-1 min-w-0 truncate">{h.name}</div>
+                  <div className="text-xs text-muted-foreground flex-1 min-w-0 truncate">
+                    {h.name}
+                    {h.brokerage && (
+                      <span className="ml-1.5 text-[10px] text-blue/80 border border-blue/30 rounded px-1 py-[1px] normal-case">
+                        {h.brokerage}
+                      </span>
+                    )}
+                  </div>
                   <div className="font-mono tabular text-xs text-muted-foreground w-20 text-right">{h.quantity} @ ${h.costBasis}</div>
                   <div className="font-mono tabular w-24 text-right">${(Number.isFinite(h.value) ? h.value : 0).toLocaleString(undefined,{maximumFractionDigits:2})}</div>
                   <div className={`font-mono tabular w-20 text-right ${safePct(h.gainPct) >= 0 ? "text-teal" : "text-rose"}`}>
@@ -858,6 +938,7 @@ type AllocRow = {
   dayChangePct: number;
   gainPct: number;
   source: "plaid" | "manual";
+  brokerage?: string | null;
   weight: number;
 };
 
