@@ -32,8 +32,8 @@ import {
   CANONICAL_SECTORS,
 } from "./finance/sectors";
 import { registerHouseholdRoutes } from "./household-routes";
-   import { registerCashAccountRoutes } from "./cash-accounts-routes";
-   import { registerVisitedPlaceRoutes } from "./visited-places-routes";
+import { registerCashAccountRoutes } from "./cash-accounts-routes";
+import { registerVisitedPlaceRoutes } from "./visited-places-routes";
 const TMDB_KEY = process.env.TMDB_API_KEY;
 const TM_KEY = process.env.TICKETMASTER_API_KEY;
 
@@ -239,9 +239,9 @@ export async function registerRoutes(
     console.warn("[demo] bookmarks seed skipped:", e.message);
   }
 // ── Shared view: household, cash accounts, visited places ──────────────
-   registerHouseholdRoutes(app);
-   registerCashAccountRoutes(app);
-   registerVisitedPlaceRoutes(app);
+  registerHouseholdRoutes(app);
+  registerCashAccountRoutes(app);
+  registerVisitedPlaceRoutes(app);
   // ══════════════════════════════════════════════════════════════════════════
   // Auth — Spotify OAuth as login
   // ══════════════════════════════════════════════════════════════════════════
@@ -3668,7 +3668,7 @@ function mulberry32(seed: number) {
 
 /* ============ Price helpers ============ */
 
-async function fetchStockPrices(symbols: string[]): Promise<Record<string, { price: number; dayChangePct: number; name?: string }>> {
+ export async function fetchStockPrices(symbols: string[]): Promise<Record<string, { price: number; dayChangePct: number; name?: string }>> {
   const out: Record<string, any> = {};
   await Promise.all(symbols.map(async (sym) => {
     try {
@@ -3689,7 +3689,7 @@ async function fetchStockPrices(symbols: string[]): Promise<Record<string, { pri
   return out;
 }
 
-async function fetchCryptoPrices(symbols: string[]): Promise<Record<string, { price: number; dayChangePct: number; name?: string }>> {
+export async function fetchCryptoPrices(symbols: string[]): Promise<Record<string, { price: number; dayChangePct: number; name?: string }>> {
   const map: Record<string, string> = { BTC: "bitcoin", ETH: "ethereum", SOL: "solana", XRP: "ripple", ADA: "cardano", DOGE: "dogecoin", AVAX: "avalanche-2", MATIC: "matic-network", LINK: "chainlink", DOT: "polkadot", LTC: "litecoin", BCH: "bitcoin-cash", UNI: "uniswap", AAVE: "aave", ATOM: "cosmos", NEAR: "near", APT: "aptos", SUI: "sui", ARB: "arbitrum", OP: "optimism" };
   const ids = symbols.map(s => map[s.toUpperCase()]).filter(Boolean);
   if (!ids.length) return {};
