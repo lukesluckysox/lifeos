@@ -1,3 +1,39 @@
+## Post-deploy fixes (after routes.ts patch went live)
+
+No new server registration needed for these — `server/household-routes.ts`
+already registers via the `registerHouseholdRoutes(app)` call you already
+added, so just drop these files in and redeploy.
+
+1. **Duplicate allocation rows merged, manual holdings tagged.**
+   `client/src/pages/Finance.tsx` — Plaid returns one holding row per
+   linked account, so the same ticker held at two brokerages (or a
+   manual symbol added twice) showed as separate rows. Same-symbol rows
+   within each source (Plaid/Plaid, manual/manual — not across) now
+   merge, value-weighted. Manual rows also get a small "M" badge inline,
+   in addition to the existing "Manual" group header.
+2. **Cash added as its own segment on the allocation color bar**, with a
+   toggle (small "Cash" pill next to the "Allocation" header) to
+   show/hide it — the bar's segments previously undershot 100% once
+   cash started counting toward net worth, since cash had no segment.
+3. **Invite link became unreachable once you generated one.**
+   `server/household.ts`'s `createOrReuseInvite` creates a household for
+   you (household-of-one) the moment you generate a link, before your
+   partner accepts — so `HouseholdSettings.tsx`'s old `!household` check
+   immediately hid the invite-getter UI with no way back to the link.
+   Fixed: the invite UI now stays up until someone besides you has
+   actually joined (`partners.length > 0`), and the "Sharing with X"
+   line/visibility list only render once a real partner exists.
+4. **New `GET /api/household/accounts` route** (`server/household-routes.ts`)
+   — same visibility rules as `/api/household/net-worth`, but returns
+   individual account rows (institution / cash-account name) tagged with
+   owner, instead of just an aggregate value per member. Powers item 5.
+5. **Connected-accounts tray labels ownership in Shared view.**
+   `client/src/components/ConnectedAccountsTray.tsx` now calls the route
+   above when `scope === "shared"`, appending your partner's *visible*
+   accounts next to your own with a "(Me)" / "(Partner's name)" suffix.
+   Your own chips keep full toggle/delete; partner chips are read-only
+   (you can't toggle or delete an account you don't own).
+
 ## Review pass — bugs found and fixed
 
 Did a full self-review of every file in this folder against each other

@@ -264,6 +264,68 @@ export function registerHouseholdRoutes(app: Express) {
     }
   });
 
+  // ── Account list for the Finance "Connected" tray, attributed by owner ──
+  // /api/household/net-worth already breaks the combined total down per
+  // member — this does the same thing one level more granular, at the
+  // individual account level, so the Connected-accounts tray can label
+  // each chip "(Me)" or "(Partner's name)" instead of just blending
+  // everyone's accounts into one unlabeled row. Same visibility rules as
+  // net-worth: your own accounts always included; a partner's account
+  // only appears here if they've explicitly marked it visible in their
+  // Settings. A hidden partner account is omitted entirely — never
+  // listed with a placeholder, same "no anonymous folding-in" rule as
+  // the net-worth endpoint.
+  app.get("/api/household/accounts", requireAuth, async (req, res) => {
+    try {
+      const household = await storage.getHouseholdForUser(req.user!.id);
+      if (!household) return res.json({ inHousehold: false, plaid: [], cash: [] });
+
+      const memberIds = await storage.getHouseholdMemberIds(household.id);
+      const plaid: Array<{ itemId: string; institutionName: string | null; ownerId: number; ownerDisplayName: string | null; isSelf: boolean }> = [];
+      const cash: Array<{ id: number; name: string; institution: string | null; balance: number; ownerId: number; ownerDisplayName: string | null; isSelf: boolean }> = [];
+
+      for (const memberId of memberIds) {
+        const isSelf = memberId === req.user!.id;
+        const user = await storage.getUser(memberId);
+        const visibility = await storage.getAccountVisibility(household.id, memberId);
+        const visibleSet = new Set(visibility.filter(v => v.visible).map(v => `${v.accountType}:${v.accountRef}`));
+
+        const plaidItems = await storage.getPlaidItems(memberId);
+        for (const item of plaidItems) {
+          const ok = isSelf || visibleSet.has(`plaid_item:${item.itemId}`);
+          if (!ok) continue;
+          plaid.push({
+            itemId: item.itemId,
+            institutionName: item.institutionName ?? null,
+            ownerId: memberId,
+            ownerDisplayName: user?.displayName ?? null,
+            isSelf,
+          });
+        }
+
+        const cashAccounts = await storage.listCashAccounts(memberId);
+        for (const acc of cashAccounts as any[]) {
+          if (!acc.includeInPortfolio) continue;
+          const ok = isSelf || visibleSet.has(`cash_account:${acc.id}`);
+          if (!ok) continue;
+          cash.push({
+            id: acc.id,
+            name: acc.name,
+            institution: acc.institution ?? null,
+            balance: Number(acc.balance) || 0,
+            ownerId: memberId,
+            ownerDisplayName: user?.displayName ?? null,
+            isSelf,
+          });
+        }
+      }
+
+      res.json({ inHousehold: true, plaid, cash });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // ── Domain-level sharing settings (Music, Events) ───────────────────────
   // Opt-out: a domain is shared unless the owning member explicitly turns
   // it off. This is the "individual" layer under the household's "parent"

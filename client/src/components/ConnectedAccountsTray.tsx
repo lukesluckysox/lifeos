@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useScope } from "./ScopeProvider";
 import { Building2, Wallet, Plus, X, Eye, EyeOff, Trash2 } from "lucide-react";
 
 interface PlaidItemRow { id: number; itemId: string; institutionName: string; createdAt: number }
@@ -13,6 +14,18 @@ interface CashAccount {
   notes: string | null;
   createdAt: number;
 }
+
+/** Owner-attributed shapes returned by GET /api/household/accounts —
+ * same accounts as the personal queries above, but merged across the
+ * household and tagged with whose account each one is, respecting the
+ * same opt-in visibility rules /api/household/net-worth already uses
+ * (a partner's account only appears if they've marked it shared). */
+interface HouseholdPlaidRow { itemId: string; institutionName: string | null; ownerId: number; ownerDisplayName: string | null; isSelf: boolean }
+interface HouseholdCashRow { id: number; name: string; institution: string | null; balance: number; ownerId: number; ownerDisplayName: string | null; isSelf: boolean }
+interface HouseholdAccountsResp { inHousehold: boolean; plaid: HouseholdPlaidRow[]; cash: HouseholdCashRow[] }
+
+const ownerLabel = (isSelf: boolean, displayName: string | null) =>
+  isSelf ? "Me" : (displayName || "Partner");
 
 const money = (n: number) =>
   `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -60,6 +73,7 @@ function describeCashError(e: any): string {
  */
 export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow[] }) {
   const queryClient = useQueryClient();
+  const { scope, household } = useScope();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [institution, setInstitution] = useState("");
@@ -72,6 +86,23 @@ export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow
     queryKey: ["/api/cash-accounts"],
     queryFn: async () => (await apiRequest("GET", "/api/cash-accounts")).json(),
   });
+
+  // Only fetched in Shared view — this is what lets the tray show whose
+  // account is whose ("(Me)" / partner's name) instead of just listing
+  // your own accounts regardless of scope.
+  const { data: householdAccounts } = useQuery<HouseholdAccountsResp>({
+    queryKey: ["/api/household/accounts"],
+    queryFn: async () => (await apiRequest("GET", "/api/household/accounts")).json(),
+    enabled: scope === "shared" && !!household,
+  });
+  const isShared = scope === "shared" && !!household && !!householdAccounts?.inHousehold;
+
+  // Your own accounts always render from the personal queries (full
+  // toggle/delete still works) — only a partner's shared accounts get
+  // appended from /api/household/accounts, and those render read-only
+  // (you can't toggle or delete something you don't own).
+  const partnerPlaid = isShared ? householdAccounts!.plaid.filter(r => !r.isSelf) : [];
+  const partnerCash = isShared ? householdAccounts!.cash.filter(r => !r.isSelf) : [];
 
   const resetForm = () => {
     setName("");
@@ -140,7 +171,7 @@ export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow
     }
   };
 
-  const hasAnything = plaidItems.length > 0 || cashAccounts.length > 0;
+  const hasAnything = plaidItems.length > 0 || cashAccounts.length > 0 || partnerPlaid.length > 0 || partnerCash.length > 0;
 
   return (
     <div
@@ -157,6 +188,19 @@ export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow
           data-testid={`chip-brokerage-${it.id}`}
         >
           {it.institutionName}
+          {isShared && <span className="opacity-60"> (Me)</span>}
+        </span>
+      ))}
+
+      {partnerPlaid.map(row => (
+        <span
+          key={`plaid-partner-${row.itemId}`}
+          className="rounded-full border border-teal/30 bg-teal/5 text-foreground/90 px-2 py-0.5 normal-case tracking-normal"
+          data-testid={`chip-brokerage-partner-${row.itemId}`}
+          title="Your partner's connected brokerage — shared from their Settings."
+        >
+          {row.institutionName}
+          <span className="opacity-60"> ({ownerLabel(false, row.ownerDisplayName)})</span>
         </span>
       ))}
 
@@ -170,6 +214,7 @@ export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow
         >
           <Wallet size={10} className={acc.includeInPortfolio ? "text-blue" : "text-muted-foreground/60"} />
           {acc.name}
+          {isShared && <span className="opacity-60">(Me)</span>}
           <span className="tabular opacity-70">{money(acc.balance)}</span>
           <button
             type="button"
@@ -189,6 +234,20 @@ export function ConnectedAccountsTray({ plaidItems }: { plaidItems: PlaidItemRow
           >
             <Trash2 size={10} />
           </button>
+        </span>
+      ))}
+
+      {partnerCash.map(row => (
+        <span
+          key={`cash-partner-${row.id}`}
+          className="inline-flex items-center gap-1.5 rounded-full border border-blue/30 bg-blue/5 text-foreground/90 px-2 py-0.5 normal-case tracking-normal"
+          data-testid={`chip-cash-account-partner-${row.id}`}
+          title="Your partner's savings account — shared from their Settings."
+        >
+          <Wallet size={10} className="text-blue" />
+          {row.name}
+          <span className="opacity-60">({ownerLabel(false, row.ownerDisplayName)})</span>
+          <span className="tabular opacity-70">{money(row.balance)}</span>
         </span>
       ))}
 

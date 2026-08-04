@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useScope } from "./ScopeProvider";
+import { useAuth } from "@/components/AuthProvider";
 import { Users, Copy, Check, LogOut, Eye, EyeOff } from "lucide-react";
 
 interface PlaidItemRow {
@@ -60,11 +61,23 @@ function describeInviteError(e: any): string {
  */
 export function HouseholdSettings() {
   const { household, refetchHousehold } = useScope();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // createOrReuseInvite() (server/household.ts) creates a household for
+  // you the moment you generate a link — before your partner ever
+  // accepts it. That means `household` goes non-null right away, which
+  // used to hide this whole invite-link UI behind the "already sharing"
+  // branch below with no way to get the link back. Only treat the
+  // household as "actually shared" once someone besides you is in it —
+  // otherwise keep showing the invite getter.
+  const partners = (household?.members ?? []).filter(m => m.id !== user?.id);
+  const awaitingPartner = !!household && partners.length === 0;
+  const showInviteGetter = !household || awaitingPartner;
 
   const { data: plaidItems = [] } = useQuery<PlaidItemRow[]>({
     queryKey: ["/api/plaid/items"],
@@ -154,10 +167,12 @@ export function HouseholdSettings() {
         <h2 className="font-display text-base">Household</h2>
       </div>
 
-      {!household ? (
+      {showInviteGetter ? (
         <>
           <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
-            Invite a partner to build a Shared view — combined Music and Events, plus opt-in Finance sharing.
+            {awaitingPartner
+              ? "Invite link created — waiting on your partner to open it and accept. Copy it again below if you need to resend."
+              : "Invite a partner to build a Shared view — combined Music and Events, plus opt-in Finance sharing."}
           </p>
           {inviteError && (
             <div
@@ -200,11 +215,7 @@ export function HouseholdSettings() {
         <>
           <div className="text-sm mb-4" data-testid="text-household-members">
             Sharing with{" "}
-            {household.members
-              .map(m => m.displayName)
-              .filter(Boolean)
-              .join(", ") || "1 other person"}
-            .
+            {partners.map(m => m.displayName).filter(Boolean).join(", ") || "your partner"}.
           </div>
 
           <div className="eyebrow mb-2">Shared with your household</div>

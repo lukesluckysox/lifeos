@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopPickPill } from "@/components/TopPickPill";
-import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, ArrowUpRight } from "lucide-react";
+import { TrendingUp, TrendingDown, Plus, X, RefreshCw, Eye, EyeOff, ArrowUpRight } from "lucide-react";
 import { SectionHeader } from "@/components/SectionHeader";
 import { PlaidConnect } from "@/components/PlaidConnect";
 import { ConnectedAccountsTray } from "@/components/ConnectedAccountsTray";
@@ -249,6 +249,17 @@ function FinancePortfolio() {
   const topConcentration = allocRows[0];
   const biggestMover = [...allocRows].sort((a, b) => Math.abs(safePct(b.dayChangePct)) - Math.abs(safePct(a.dayChangePct)))[0];
 
+  // The color bar's segments used to only ever be stock/crypto holdings,
+  // so once cash started counting toward netWorth the segments stopped
+  // summing to 100% — cash's share of the total was invisible. Show it
+  // as its own segment, with a toggle so it can still be hidden if you'd
+  // rather just see the stock/crypto mix.
+  const [showCashInBar, setShowCashInBar] = useState(true);
+  const cashBarRow = cashValue > 0 && netWorth > 0
+    ? { symbol: "CASH", weight: (cashValue / netWorth) * 100, isCash: true as const }
+    : null;
+  const barRows = showCashInBar && cashBarRow ? [...allocRows, cashBarRow] : allocRows;
+
   /* 7-day sparklines for each holding */
   const holdingSymbols = useMemo(() => allocRows.map(r => r.symbol), [allocRows]);
   const { data: chartData } = useHoldingCharts(holdingSymbols, mode);
@@ -361,12 +372,28 @@ function FinancePortfolio() {
       {/* ============ Allocation + Index comparison ============ */}
       <section className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-10">
         <div>
-          <SectionHeader eyebrow="Allocation" title="Where it sits" />
+          <div className="flex items-center justify-between gap-3">
+            <SectionHeader eyebrow="Allocation" title="Where it sits" />
+            {cashBarRow && (
+              <button
+                type="button"
+                data-testid="button-toggle-cash-in-bar"
+                onClick={() => setShowCashInBar(v => !v)}
+                title={showCashInBar ? "Hide cash from the bar below" : "Show cash as its own segment in the bar below"}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider transition ${
+                  showCashInBar ? "border-blue/40 bg-blue/10 text-blue" : "border-border text-muted-foreground"
+                }`}
+              >
+                {showCashInBar ? <Eye size={11} /> : <EyeOff size={11} />}
+                Cash
+              </button>
+            )}
+          </div>
           {allocRows.length === 0 ? (
             <EmptyCard label="No holdings yet" sub="Connect Plaid or add holdings manually below." />
           ) : (
             <>
-              <AllocationBar rows={allocRows} />
+              <AllocationBar rows={barRows} />
               {/* Nested by source rather than one flat merged list — Plaid
                   and manually-entered holdings each get their own labeled
                   group with a subtotal weight, so it's clear at a glance
@@ -875,15 +902,20 @@ function AllocationRow({ row: r, sparkline }: { row: AllocRow; sparkline: { t: n
   );
 }
 
-function AllocationBar({ rows }: { rows: { symbol: string; weight: number }[] }) {
+function AllocationBar({ rows }: { rows: { symbol: string; weight: number; isCash?: boolean }[] }) {
   const palette = ["bg-teal", "bg-gold", "bg-rose", "bg-foreground/70", "bg-muted-foreground/60", "bg-foreground/45", "bg-teal/60", "bg-gold/60", "bg-rose/60", "bg-foreground/30", "bg-muted-foreground/40", "bg-foreground/20"];
+  // Cash always renders in the same blue used for cash chips elsewhere
+  // (ConnectedAccountsTray, the "Cash" metric) instead of rotating into
+  // the stock/crypto palette — it isn't a holding, so it shouldn't look
+  // like one.
+  const colorFor = (r: { isCash?: boolean }, i: number) => (r.isCash ? "bg-blue" : palette[i % palette.length]);
   return (
     <div>
       <div className="flex h-12 rounded-md overflow-hidden border border-border">
         {rows.map((r, i) => (
           <div
             key={r.symbol}
-            className={`${palette[i % palette.length]} transition-opacity hover:opacity-80`}
+            className={`${colorFor(r, i)} transition-opacity hover:opacity-80`}
             style={{ width: `${Number.isFinite(r.weight) ? r.weight : 0}%` }}
             title={`${r.symbol} · ${fixed(r.weight, 1)}%`}
           />
@@ -892,7 +924,7 @@ function AllocationBar({ rows }: { rows: { symbol: string; weight: number }[] })
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] font-mono uppercase tracking-wider">
         {rows.map((r, i) => (
           <span key={r.symbol} className="inline-flex items-center gap-1.5 text-muted-foreground">
-            <span className={`h-1.5 w-1.5 rounded-full ${palette[i % palette.length]}`} />
+            <span className={`h-1.5 w-1.5 rounded-full ${colorFor(r, i)}`} />
             {r.symbol}
           </span>
         ))}
